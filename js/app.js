@@ -1430,7 +1430,11 @@ async function sendRecognition() {
       sendBtn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Subiendo imagen...';
       lucide.createIcons();
       const { isOk: imgOk, url } = await window.storageSdk.uploadRecognitionImage(_recogImageBase64);
-      if (imgOk && url) finalMessage = message + '\n' + url;
+      if (imgOk && url) {
+        finalMessage = message + '\n' + url;
+      } else {
+        showErrorToast('No se pudo subir la imagen — el reconocimiento se enviará sin ella');
+      }
     }
 
     const recCompanyId = currentUser.company_id || recipient.company_id;
@@ -1522,8 +1526,13 @@ function parseCommentMessage(message) {
   const imgs = [], textLines = [];
   for (const line of lines) {
     const t = line.trim();
-    if (/^https?:\/\/\S+\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i.test(t)) imgs.push(t);
-    else if (t) textLines.push(t);
+    // Match image URLs: ending in extension OR Supabase storage public URLs
+    if (/^https?:\/\/\S+\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i.test(t) ||
+        /^https?:\/\/\S+\/storage\/v1\/object\/public\/\S+$/i.test(t)) {
+      imgs.push(t);
+    } else if (t) {
+      textLines.push(t);
+    }
   }
   return { text: textLines.join('\n'), imgs };
 }

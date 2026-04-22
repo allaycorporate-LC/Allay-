@@ -307,11 +307,9 @@ window.storageSdk = {
     try {
       const res  = await fetch(base64DataUrl);
       const blob = await res.blob();
-      const path = `recognitions/${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
-      const { error } = await _sb.storage.from('comment-images').upload(path, blob, { contentType: 'image/jpeg' });
-      if (error) { console.error('recognition image upload error:', error.message); return { isOk: false }; }
-      const { data: { publicUrl } } = _sb.storage.from('comment-images').getPublicUrl(path);
-      return { isOk: true, url: publicUrl };
+      // Use same path pattern as uploadCommentImage so bucket policies apply
+      const file = new File([blob], `recognition_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      return this.uploadCommentImage(file);
     } catch (e) {
       console.error('uploadRecognitionImage exception:', e);
       return { isOk: false };
