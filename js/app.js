@@ -1385,11 +1385,17 @@ function toggleBudgetSource() {
 // SEND RECOGNITION
 // ─────────────────────────────────────────
 async function sendRecognition() {
-  const message       = document.getElementById('recog-message').value;
+  const message       = document.getElementById('recog-message').value.trim();
   const pointsOn      = document.getElementById('points-toggle')?.getAttribute('aria-checked') === 'true';
   const points        = pointsOn ? parseInt(document.getElementById('points-slider').value) : 0;
   const usingBudget   = document.getElementById('use-program-budget')?.checked;
   const selectedProg  = _getProgramByLabel(selectedProgram);
+
+  if (!message) {
+    showErrorToast('El mensaje es obligatorio');
+    document.getElementById('recog-message').focus();
+    return;
+  }
 
   if (pointsOn) {
     if (usingBudget && selectedProg?.custom) {
