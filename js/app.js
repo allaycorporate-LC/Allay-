@@ -51,19 +51,29 @@ function _applySidebarState() {
   }
 }
 
-function sidebarNav(callback) { callback(); }
+function sidebarNav(callback) {
+  // Cerrar profile page si está abierta antes de navegar
+  const profilePage = document.getElementById('profile-page');
+  if (profilePage && !profilePage.classList.contains('hidden')) {
+    profilePage.classList.add('hidden');
+    profilePage.style.display = 'none';
+    if (currentPage === 'profile') currentPage = 'home';
+  }
+  callback();
+}
 
 function _positionOverlayPage(pageId) {
   const page    = document.getElementById(pageId);
   const sidebar = document.getElementById('left-sidebar');
   if (!page || !sidebar) return;
   const w = sidebar.style.width || '16rem';
-  page.style.left = w;
+  page.style.left     = w;
   page.style.position = 'fixed';
-  page.style.top = '0';
-  page.style.right = '0';
-  page.style.bottom = '0';
-  page.style.zIndex = '40';
+  page.style.top      = '0';
+  page.style.right    = '0';
+  page.style.bottom   = '0';
+  page.style.zIndex   = '40';
+  page.style.display  = '';  // asegura que display:none no persista
 }
 
 function _initSidebarTooltip() {
@@ -97,6 +107,7 @@ let employees = [];
 let selectedFile = null;
 let currentUser = null;
 let originalSuperadminUser = null;
+let isImpersonating = false;
 let allUsers = [];
 let isLoggedIn = false;
 let notificationsTab = 'all';
@@ -245,6 +256,7 @@ function logout() {
   window.authSdk.logout();
   currentUser = null;
   isLoggedIn  = false;
+  isImpersonating = false;
   document.body.classList.remove('is-superadmin');
   originalSuperadminUser = null;
   document.getElementById('app').classList.add('hidden');
@@ -861,7 +873,9 @@ function toggleNotifications(e) {
 
 function openNotificationsPage() {
   currentPage = 'notifications';
-  document.getElementById('notifications-page').classList.remove('hidden');
+  const np = document.getElementById('notifications-page');
+  np.style.display = '';
+  np.classList.remove('hidden');
   _positionOverlayPage('notifications-page');
   document.getElementById('notifications-dropdown').classList.add('hidden');
   renderNotificationsPage();
@@ -1044,9 +1058,13 @@ function updateProfileDisplay() {
 
 function openProfilePage() {
   currentPage = 'profile';
-  document.getElementById('profile-page').classList.remove('hidden');
+  ['admin-page', 'analytics-page', 'store-page', 'notifications-page', 'programs-page'].forEach(id => {
+    document.getElementById(id)?.classList.add('hidden');
+  });
+  const pp = document.getElementById('profile-page');
+  pp.style.display = '';
+  pp.classList.remove('hidden');
   _positionOverlayPage('profile-page');
-  document.getElementById('admin-page').classList.add('hidden');
   updateProfileDisplay();
 }
 
@@ -1082,8 +1100,10 @@ function openAdminPage() {
     return;
   }
   currentPage = 'admin';
+  const ap = document.getElementById('admin-page');
+  ap.style.display = '';
+  ap.classList.remove('hidden');
   _positionOverlayPage('admin-page');
-  document.getElementById('admin-page').classList.remove('hidden');
   updateAdminVisibility();
   loadCompanyPrograms();
 }
@@ -1118,6 +1138,7 @@ function impersonateEmployee(empBackendId) {
     points_to_redeem: emp.points_to_redeem, __backendId: emp.__backendId
   };
 
+  isImpersonating = true;
   document.body.classList.remove('is-superadmin');
   updateAdminVisibility();
   updateImpersonationBanner();
@@ -1163,6 +1184,7 @@ function returnToSuperadmin() {
   if (!originalSuperadminUser) { showErrorToast('No hay cuenta de superadmin para volver'); return; }
   currentUser = { ...originalSuperadminUser };
   originalSuperadminUser = null;
+  isImpersonating = false;
   document.body.classList.add('is-superadmin');
   filterEmployeesByCompany();
   renderEmployeesList();
@@ -1645,7 +1667,7 @@ function switchPage(page) {
   // Cerrar cualquier página overlay abierta
   ['admin-page', 'analytics-page', 'store-page', 'profile-page', 'notifications-page', 'programs-page'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.classList.add('hidden');
+    if (el) { el.classList.add('hidden'); el.style.display = 'none'; }
   });
   destroyCharts();
 
@@ -1833,6 +1855,13 @@ function buildFeedCard(rec) {
        </div>`
     : '';
 
+  const _isAdminView    = !isImpersonating && (currentUser?.role === 'superadmin' || currentUser?.role === 'admin');
+  const _myId           = currentUser?.__backendId;
+  const _isInvolved     = _myId != null && (_myId === rec.from_user?.id || _myId === rec.to_user?.id);
+  const pointsBadgeHtml = (_isAdminView || _isInvolved) && rec.points > 0
+    ? `<span class="bg-gradient-to-r ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${rec.points} pts</span>`
+    : '';
+
   card.innerHTML = `
     ${bannerHtml}
     <div class="p-5">
@@ -1843,7 +1872,7 @@ function buildFeedCard(rec) {
           <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> ${formatTimeAgo(rec.created_at)} · <span class="text-violet-500 font-medium">${rec.program}</span></p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <span class="bg-gradient-to-r ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${rec.points} pts</span>
+          ${pointsBadgeHtml}
           <div class="feed-admin-menu relative">
             <button onclick="toggleFeedMenu(event,'${rec.id}')" class="p-1 rounded-lg hover:bg-gray-100 transition text-gray-400 hover:text-gray-600 font-bold text-base leading-none">···</button>
             <div id="feedmenu-${rec.id}" class="hidden absolute right-0 top-7 bg-white border border-gray-100 rounded-xl shadow-lg py-1 min-w-[140px] z-10">
@@ -1928,7 +1957,6 @@ async function renderFeed(reset = true) {
     lucide.createIcons();
   }
 
-  const isImpersonating = !!originalSuperadminUser;
   const isSuperadminView = currentUser?.role === 'superadmin' && !isImpersonating;
   const companyFilter = isSuperadminView ? null : currentUser?.company_id;
   const { isOk, data } = await window.recognitionSdk.list(feedOffset, FEED_LIMIT, companyFilter);
@@ -2063,7 +2091,9 @@ function updateNotificationBadge() {
 // STORE
 // ─────────────────────────────────────────
 async function openStore() {
-  document.getElementById('store-page').classList.remove('hidden');
+  const sp = document.getElementById('store-page');
+  sp.style.display = '';
+  sp.classList.remove('hidden');
   _positionOverlayPage('store-page');
   if (currentUser) {
     const pts = currentUser.points_to_redeem || 0;
@@ -2240,6 +2270,7 @@ async function loadCompanyPrograms() {
 function openProgramsPage() {
   const page = document.getElementById('programs-page');
   if (!page) return;
+  page.style.display = '';
   page.classList.remove('hidden');
   _positionOverlayPage('programs-page');
   renderProgramsPage();
