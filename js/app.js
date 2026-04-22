@@ -1428,8 +1428,9 @@ async function sendRecognition() {
       await window.dataSdk.update(topped);
     }
 
+    const recCompanyId = currentUser.company_id || recipient.company_id;
     const { isOk, error } = await window.recognitionSdk.send(
-      recipient.__backendId, points, selectedProgram, message, currentUser.company_id
+      recipient.__backendId, points, selectedProgram, message, recCompanyId
     );
 
     if (!isOk) {
@@ -1962,7 +1963,13 @@ async function renderFeed(reset = true) {
 
   const isSuperadminView = currentUser?.role === 'superadmin' && !isImpersonating;
   const companyFilter = isSuperadminView ? null : currentUser?.company_id;
-  const { isOk, data } = await window.recognitionSdk.list(feedOffset, FEED_LIMIT, companyFilter);
+  const { isOk, data: rawData } = await window.recognitionSdk.list(feedOffset, FEED_LIMIT, companyFilter);
+
+  // Secondary client-side filter: removes records whose company_id doesn't match,
+  // catching cases where the DB field is null or was set incorrectly.
+  const data = (companyFilter && rawData)
+    ? rawData.filter(r => r.company_id === companyFilter)
+    : (rawData || []);
 
   if (reset) container.innerHTML = '';
   document.getElementById('load-more-feed')?.remove();
