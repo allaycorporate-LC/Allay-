@@ -1965,18 +1965,23 @@ async function renderFeed(reset = true) {
   const companyFilter = isSuperadminView ? null : currentUser?.company_id;
   const { isOk, data: rawData } = await window.recognitionSdk.list(feedOffset, FEED_LIMIT, companyFilter);
 
-  // Client-side filter by user membership: more reliable than rec.company_id
-  // (which can be null/wrong for old records). Show a recognition only if
-  // the sender or receiver is a member of the current user's company.
+  // DEBUG — remove after diagnosis
+  console.log('[Feed] currentUser:', currentUser?.email, '| role:', currentUser?.role, '| company_id:', currentUser?.company_id);
+  console.log('[Feed] isImpersonating:', isImpersonating, '| companyFilter:', companyFilter);
+  console.log('[Feed] rawData count:', rawData?.length, '| sample company_ids:', rawData?.slice(0,5).map(r => r.company_id));
+  const companyMemberIds = companyFilter
+    ? new Set(allUsers.filter(u => u.company_id === companyFilter).map(u => u.__backendId))
+    : null;
+  console.log('[Feed] companyMemberIds size:', companyMemberIds?.size, '| allUsers count:', allUsers.length);
+  console.log('[Feed] sample from_user ids in rawData:', rawData?.slice(0,5).map(r => r.from_user?.id));
+
   let data = rawData || [];
-  if (companyFilter) {
-    const companyMemberIds = new Set(
-      allUsers.filter(u => u.company_id === companyFilter).map(u => u.__backendId)
-    );
+  if (companyFilter && companyMemberIds) {
     data = data.filter(r =>
       companyMemberIds.has(r.from_user?.id) || companyMemberIds.has(r.to_user?.id)
     );
   }
+  console.log('[Feed] after filter count:', data.length);
 
   if (reset) container.innerHTML = '';
   document.getElementById('load-more-feed')?.remove();
