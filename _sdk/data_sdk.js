@@ -46,20 +46,39 @@ window.dataSdk = (function () {
     },
 
     async create(record) {
-      const { data, error } = await _sb.functions.invoke('create-user', {
-        body: {
-          email:            record.email,
-          password:         record.password || 'Allay2024!',
-          name:             record.name,
-          department:       record.department       || 'General',
-          company_id:       record.company_id       || 'comp-1',
-          role:             record.role             || 'employee',
-          points_to_give:   record.points_to_give   ?? 100,
-          points_to_redeem: record.points_to_redeem ?? 0
+      try {
+        const { data: { session } } = await _sb.auth.getSession();
+        const token = session?.access_token || SUPABASE_ANON_KEY;
+
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/create-user`, {
+          method: 'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'apikey':        SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            email:            record.email,
+            password:         record.password         || 'Allay2024!',
+            name:             record.name,
+            department:       record.department        || 'General',
+            company_id:       record.company_id        || 'comp-1',
+            role:             record.role              || 'employee',
+            points_to_give:   record.points_to_give   ?? 100,
+            points_to_redeem: record.points_to_redeem ?? 0,
+          })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const errorMessage = json?.error || `Error ${res.status}`;
+          console.error('create-user error:', errorMessage);
+          return { isOk: false, error: errorMessage };
         }
-      });
-      if (error) { console.error('create-user error:', error); return { isOk: false }; }
-      return { isOk: true, data };
+        return { isOk: true, data: json };
+      } catch (e) {
+        console.error('create-user exception:', e);
+        return { isOk: false, error: e.message || 'Error de conexión' };
+      }
     },
 
     async update(record) {
@@ -100,8 +119,8 @@ window.recognitionSdk = {
     return { isOk: !error, id: data, error };
   },
 
-  async list(offset = 0, limit = 10) {
-    const { data, error } = await _sb
+  async list(offset = 0, limit = 10, companyId = null) {
+    let query = _sb
       .from('recognitions')
       .select(`
         id, points, program, message, created_at, company_id,
@@ -110,10 +129,19 @@ window.recognitionSdk = {
         reactions(emoji, user_id),
         comments(id, message, created_at, user:profiles!comments_user_id_fkey(id, name))
       `)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .order('created_at', { ascending: false });
+
+    if (companyId) query = query.eq('company_id', companyId);
+
+    const { data, error } = await query.range(offset, offset + limit - 1);
     if (error) console.error('recognitions list error:', error.message);
     return { isOk: !error, data: data || [] };
+  },
+
+  async delete(id) {
+    const { error } = await _sb.from('recognitions').delete().eq('id', id);
+    if (error) console.error('recognition delete error:', error.message);
+    return { isOk: !error };
   },
 
   async toggleReaction(recognitionId, emoji, userId) {

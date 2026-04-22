@@ -195,6 +195,7 @@ async function handleLogin(e) {
     };
 
     isLoggedIn = true;
+    document.body.classList.toggle('is-superadmin', currentUser.role === 'superadmin');
     document.getElementById('login-form').reset();
     errorDiv.classList.add('hidden');
     loginBtn.disabled = false;
@@ -244,6 +245,7 @@ function logout() {
   window.authSdk.logout();
   currentUser = null;
   isLoggedIn  = false;
+  document.body.classList.remove('is-superadmin');
   originalSuperadminUser = null;
   document.getElementById('app').classList.add('hidden');
   document.getElementById('change-password-modal').classList.add('hidden');
@@ -258,23 +260,26 @@ function logout() {
 // PASSWORD CHANGE (FIRST LOGIN)
 // ─────────────────────────────────────────
 function validatePasswordRequirements() {
-  const newPwd    = document.getElementById('new-password-input').value;
+  const newPwd     = document.getElementById('new-password-input').value;
   const confirmPwd = document.getElementById('confirm-password-input').value;
-  const saveBtn   = document.getElementById('pwd-change-save-btn');
+  const saveBtn    = document.getElementById('pwd-change-save-btn');
 
-  const hasLength = newPwd.length >= 6;
-  const lengthReq = document.getElementById('req-length');
-  lengthReq.classList.toggle('text-gray-300', !hasLength);
-  lengthReq.classList.toggle('text-green-500', hasLength);
-  lengthReq.textContent = hasLength ? '✓' : '○';
+  const checks = [
+    { id: 'req-length', ok: newPwd.length >= 6 },
+    { id: 'req-upper',  ok: /[A-Z]/.test(newPwd) },
+    { id: 'req-number', ok: /[0-9]/.test(newPwd) },
+    { id: 'req-match',  ok: newPwd === confirmPwd && newPwd.length > 0 },
+  ];
 
-  const matches  = newPwd === confirmPwd && newPwd.length > 0;
-  const matchReq = document.getElementById('req-match');
-  matchReq.classList.toggle('text-gray-300', !matches);
-  matchReq.classList.toggle('text-green-500', matches);
-  matchReq.textContent = matches ? '✓' : '○';
+  checks.forEach(({ id, ok }) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('text-gray-300', !ok);
+    el.classList.toggle('text-green-500', ok);
+    el.textContent = ok ? '✓' : '○';
+  });
 
-  saveBtn.disabled = !(hasLength && matches);
+  saveBtn.disabled = !checks.every(c => c.ok);
 }
 
 document.addEventListener('input', (e) => {
@@ -292,8 +297,8 @@ async function saveNewPassword() {
   const errorText  = document.getElementById('pwd-change-error-text');
   const saveBtn    = document.getElementById('pwd-change-save-btn');
 
-  if (newPwd.length < 6) {
-    errorText.textContent = 'La contraseña debe tener al menos 6 caracteres';
+  if (newPwd.length < 6 || !/[A-Z]/.test(newPwd) || !/[0-9]/.test(newPwd)) {
+    errorText.textContent = 'La contraseña debe tener al menos 6 caracteres, una mayúscula y un número';
     errorDiv.classList.remove('hidden');
     return;
   }
@@ -400,7 +405,6 @@ const dataHandler = {
   onDataChanged(data) {
     allUsers  = data || [];
     employees = [...allUsers];
-    testUsers = [...allUsers];
     if (isLoggedIn && currentUser) {
       filterEmployeesByCompany();
       renderEmployeesList();
@@ -429,6 +433,10 @@ initDataSDK();
 // ─────────────────────────────────────────
 // EMPLOYEE LIST (ADMIN PANEL)
 // ─────────────────────────────────────────
+function filterEmployeesSearch() {
+  renderEmployeesList();
+}
+
 function renderEmployeesList() {
   const container = document.getElementById('employees-container');
   const countEl   = document.getElementById('employee-count');
@@ -442,6 +450,15 @@ function renderEmployeesList() {
     displayEmployees = (allUsers || []).filter(emp => emp.company_id === currentUser.company_id);
   }
 
+  const searchTerm = (document.getElementById('employee-search')?.value || '').toLowerCase().trim();
+  if (searchTerm) {
+    displayEmployees = displayEmployees.filter(emp =>
+      emp.name?.toLowerCase().includes(searchTerm) ||
+      emp.email?.toLowerCase().includes(searchTerm) ||
+      emp.department?.toLowerCase().includes(searchTerm)
+    );
+  }
+
   countEl.textContent = `${displayEmployees.length} ${displayEmployees.length === 1 ? 'empleado' : 'empleados'}`;
 
   if (displayEmployees.length === 0) {
@@ -449,7 +466,7 @@ function renderEmployeesList() {
     return;
   }
 
-  const isSuperadmin = currentUser?.role === 'superadmin';
+  const canManage = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
 
   container.innerHTML = displayEmployees.map(emp => `
     <div class="p-4 rounded-xl border border-gray-200 hover:border-violet-300 hover:bg-violet-50/30 transition flex items-center justify-between">
@@ -467,20 +484,25 @@ function renderEmployeesList() {
             <span class="text-xs text-gray-400">para dar</span>
           </div>
           <div class="flex items-center gap-1 text-sm mt-1">
-            <span class="font-semibold text-rosa-600">${emp.points_to_redeem}</span>
+            <span class="font-semibold text-green-600">${emp.points_to_redeem}</span>
             <span class="text-xs text-gray-400">para canjear</span>
           </div>
         </div>
-        ${isSuperadmin ? `
+        ${canManage ? `
+        <button onclick="openPointsModal('${emp.__backendId}', '${emp.name.replace(/'/g,"\\'")}', ${emp.points_to_give}, ${emp.points_to_redeem})" class="p-2 rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-600 transition" title="Gestionar puntos">
+          <i data-lucide="coins" class="w-4 h-4"></i>
+        </button>` : ''}
+        ${currentUser?.role === 'superadmin' ? `
         <button onclick="impersonateEmployee('${emp.__backendId}')" class="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition" title="Usar cuenta de este empleado">
           <i data-lucide="user-check" class="w-4 h-4"></i>
         </button>
-        <button onclick="openRoleModal('${emp.__backendId}', '${emp.name}', '${emp.email}', '${emp.role}')" class="p-2 rounded-lg hover:bg-purple-50 text-gray-400 hover:text-purple-600 transition" title="Cambiar rol">
+        <button onclick="openRoleModal('${emp.__backendId}', '${emp.name.replace(/'/g,"\\'")}', '${emp.email}', '${emp.role}')" class="p-2 rounded-lg hover:bg-purple-50 text-gray-400 hover:text-purple-600 transition" title="Cambiar rol">
           <i data-lucide="shield" class="w-4 h-4"></i>
         </button>` : ''}
-        <button onclick="deleteEmployee('${emp.__backendId}')" class="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition">
+        ${canManage ? `
+        <button onclick="deleteEmployee('${emp.__backendId}')" class="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Eliminar empleado">
           <i data-lucide="trash-2" class="w-4 h-4"></i>
-        </button>
+        </button>` : ''}
       </div>
     </div>
   `).join('');
@@ -549,6 +571,7 @@ function parseCSV(csvText) {
   const passwordIdx= idx(['contraseña', 'password', 'pass']);
   const deptIdx    = idx(['departamento', 'department', 'depto']);
   const companyIdx = idx(['empresa', 'company_id', 'company']);
+  const roleIdx    = idx(['rol', 'role']);
   const giveIdx    = idx(['para_dar', 'to_give', 'puntos_dar']);
   const redeemIdx  = idx(['para_canjear', 'to_redeem', 'puntos_canjear']);
 
@@ -560,16 +583,18 @@ function parseCSV(csvText) {
     if (cols.length >= 5 && cols[0]) {
       const email = cols[emailIdx] || cols[1];
       if (allUsers.find(emp => emp.email === email)) { duplicates.push(email); continue; }
+      const rawRole = (roleIdx !== -1 ? cols[roleIdx] : '') || 'employee';
+      const validRole = ['employee', 'admin', 'superadmin'].includes(rawRole) ? rawRole : 'employee';
       newEmployees.push({
         name:             cols[nameIdx]    || cols[0],
         email,
-        password:         cols[passwordIdx] || 'password123',
-        department:       cols[deptIdx]    || cols[2],
-        company_id:       cols[companyIdx] || 'comp-1',
-        points_to_give:   parseInt(cols[giveIdx]   || cols[3]) || 0,
+        password:         cols[passwordIdx] || 'Allay2024!',
+        department:       cols[deptIdx]    || cols[2] || 'General',
+        company_id:       cols[companyIdx] || currentUser?.company_id || 'comp-1',
+        points_to_give:   parseInt(cols[giveIdx]   || cols[3]) || 100,
         points_to_redeem: parseInt(cols[redeemIdx] || cols[4]) || 0,
         user_id:          email,
-        role:             'employee'
+        role:             validRole
       });
     }
   }
@@ -593,21 +618,105 @@ async function uploadEmployees() {
     btn.disabled = true;
     btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Cargando...';
 
-    for (const emp of newEmps) await window.dataSdk.create(emp);
+    const results = [];
+    for (const emp of newEmps) {
+      const result = await window.dataSdk.create(emp);
+      results.push({ emp, ok: result.isOk, error: result.error || null });
+    }
 
-    btn.disabled = true;
+    await window.dataSdk.refresh();
+    filterEmployeesByCompany();
+    renderEmployeesList();
+
+    btn.disabled = false;
     btn.innerHTML = '<i data-lucide="upload-cloud" class="w-4 h-4"></i> Cargar empleados';
     selectedFile = null;
     document.getElementById('csv-file-input').value = '';
     const hint = document.querySelector('.border-dashed p:last-child');
     if (hint) hint.textContent = 'o arrastra y suelta aquí';
 
-    let msg = `¡${newEmps.length} empleado(s) cargado(s) exitosamente!`;
-    if (duplicates.length > 0) msg += ` (${duplicates.length} ya existente(s))`;
-    showSuccessToast(msg);
+    showCsvResults(results, duplicates);
     lucide.createIcons();
   };
   reader.readAsText(selectedFile);
+}
+
+function friendlyCsvError(raw) {
+  if (!raw) return 'Error desconocido';
+  const r = raw.toLowerCase();
+  if (r.includes('failed to send a request to the edge function') || r.includes('failed to fetch'))
+    return 'No se pudo conectar con el servidor. Verificá tu conexión a internet.';
+  if (r.includes('user already registered') || r.includes('already exists') || r.includes('duplicate') || r.includes('unique'))
+    return 'El email ya está registrado en la plataforma.';
+  if (r.includes('invalid email') || r.includes('email inválido'))
+    return 'El formato del email no es válido.';
+  if (r.includes('foreign key') || r.includes('violates') || r.includes('company'))
+    return 'El ID de empresa (company_id) no existe. Usá: comp-1, comp-2 o comp-3.';
+  if (r.includes('forbidden') || r.includes('403'))
+    return 'Sin permiso para crear usuarios. Tu cuenta debe ser admin o superadmin.';
+  if (r.includes('unauthorized') || r.includes('401'))
+    return 'Sesión no válida. Cerrá sesión y volvé a ingresar.';
+  if (r.includes('password') || r.includes('contraseña'))
+    return 'La contraseña no cumple los requisitos mínimos (al menos 6 caracteres).';
+  if (r.includes('network') || r.includes('fetch') || r.includes('connection'))
+    return 'Error de conexión. Verificá tu acceso a internet.';
+  return raw;
+}
+
+function showCsvResults(results, duplicates) {
+  const modal   = document.getElementById('csv-results-modal');
+  const summary = document.getElementById('csv-results-summary');
+  const list    = document.getElementById('csv-results-list');
+
+  const ok  = results.filter(r => r.ok).length;
+  const err = results.filter(r => !r.ok).length;
+
+  summary.innerHTML = `
+    <span class="flex items-center gap-1.5 text-green-600 bg-green-50 px-3 py-1.5 rounded-full">
+      <i data-lucide="check-circle" class="w-4 h-4"></i> ${ok} exitoso(s)
+    </span>
+    ${err > 0 ? `<span class="flex items-center gap-1.5 text-red-600 bg-red-50 px-3 py-1.5 rounded-full">
+      <i data-lucide="x-circle" class="w-4 h-4"></i> ${err} error(es)
+    </span>` : ''}
+    ${duplicates.length > 0 ? `<span class="flex items-center gap-1.5 text-amber-600 bg-amber-50 px-3 py-1.5 rounded-full">
+      <i data-lucide="skip-forward" class="w-4 h-4"></i> ${duplicates.length} duplicado(s)
+    </span>` : ''}
+  `;
+
+  let html = '';
+  for (const r of results) {
+    html += `
+      <div class="flex items-start gap-3 p-3 rounded-xl ${r.ok ? 'bg-green-50' : 'bg-red-50'} border ${r.ok ? 'border-green-100' : 'border-red-100'}">
+        <div class="mt-0.5 shrink-0">
+          ${r.ok
+            ? '<i data-lucide="check-circle" class="w-4 h-4 text-green-500"></i>'
+            : '<i data-lucide="x-circle" class="w-4 h-4 text-red-500"></i>'}
+        </div>
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-gray-800 truncate">${r.emp.name}</p>
+          <p class="text-xs text-gray-500 truncate">${r.emp.email}</p>
+          ${!r.ok ? `<p class="text-xs text-red-600 mt-1 font-medium">${friendlyCsvError(r.error)}</p>` : ''}
+        </div>
+      </div>`;
+  }
+  for (const dup of duplicates) {
+    html += `
+      <div class="flex items-start gap-3 p-3 rounded-xl bg-amber-50 border border-amber-100">
+        <div class="mt-0.5 shrink-0"><i data-lucide="skip-forward" class="w-4 h-4 text-amber-500"></i></div>
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-gray-800 truncate">${dup}</p>
+          <p class="text-xs text-amber-600 mt-0.5">Ya existe en la plataforma — omitido</p>
+        </div>
+      </div>`;
+  }
+
+  list.innerHTML = html;
+  modal.classList.remove('hidden');
+  lucide.createIcons();
+}
+
+function closeCsvResultsModal() {
+  document.getElementById('csv-results-modal').classList.add('hidden');
 }
 
 async function deleteEmployee(id) {
@@ -627,6 +736,61 @@ async function clearAllEmployees() {
 // ROLE MANAGEMENT
 // ─────────────────────────────────────────
 let selectedEmployeeForRole = null;
+
+// ─────────────────────────────────────────
+// POINTS MODAL
+// ─────────────────────────────────────────
+let _pointsTargetId = null;
+
+function openPointsModal(empId, name, currentGive, currentRedeem) {
+  _pointsTargetId = empId;
+  document.getElementById('points-modal-name').textContent  = name;
+  document.getElementById('points-give-current').textContent    = currentGive;
+  document.getElementById('points-redeem-current').textContent  = currentRedeem;
+  document.getElementById('points-give-input').value    = '';
+  document.getElementById('points-redeem-input').value  = '';
+  document.getElementById('points-give-op').value       = 'add';
+  document.getElementById('points-redeem-op').value     = 'add';
+  document.getElementById('points-modal').classList.remove('hidden');
+}
+
+function closePointsModal() {
+  document.getElementById('points-modal').classList.add('hidden');
+  _pointsTargetId = null;
+}
+
+async function savePoints() {
+  if (!_pointsTargetId) return;
+  const emp = allUsers.find(u => u.__backendId === _pointsTargetId);
+  if (!emp) return;
+
+  const giveVal   = parseInt(document.getElementById('points-give-input').value)   || 0;
+  const redeemVal = parseInt(document.getElementById('points-redeem-input').value) || 0;
+  const giveOp    = document.getElementById('points-give-op').value;
+  const redeemOp  = document.getElementById('points-redeem-op').value;
+
+  const newGive   = Math.max(0, giveOp   === 'add' ? emp.points_to_give   + giveVal   : emp.points_to_give   - giveVal);
+  const newRedeem = Math.max(0, redeemOp === 'add' ? emp.points_to_redeem + redeemVal : emp.points_to_redeem - redeemVal);
+
+  const btn = document.getElementById('points-save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  const result = await window.dataSdk.update({ ...emp, points_to_give: newGive, points_to_redeem: newRedeem });
+
+  btn.disabled = false;
+  btn.textContent = 'Guardar cambios';
+
+  if (result.isOk) {
+    showSuccessToast(`Puntos actualizados para ${emp.name}`);
+    closePointsModal();
+    await window.dataSdk.refresh();
+    filterEmployeesByCompany();
+    renderEmployeesList();
+  } else {
+    showErrorToast('Error al actualizar los puntos');
+  }
+}
 
 function openRoleModal(empId, name, email, currentRole) {
   if (!currentUser || currentUser.role !== 'superadmin') { showErrorToast('Solo superadmins pueden cambiar roles de usuarios'); return; }
@@ -920,7 +1084,6 @@ function openAdminPage() {
   currentPage = 'admin';
   _positionOverlayPage('admin-page');
   document.getElementById('admin-page').classList.remove('hidden');
-  renderImpersonationList();
   updateAdminVisibility();
   loadCompanyPrograms();
 }
@@ -934,90 +1097,12 @@ function updateAdminVisibility() {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
   document.getElementById('admin-nav-link')?.classList.toggle('hidden', !isAdmin);
   document.getElementById('analytics-nav-link')?.classList.toggle('hidden', !isAdmin);
+  document.body.classList.toggle('is-admin', isAdmin);
 }
 
 // ─────────────────────────────────────────
 // IMPERSONATION
 // ─────────────────────────────────────────
-let testUsers = [];
-
-function renderImpersonationList() {
-  const container = document.getElementById('impersonation-list');
-  if (testUsers.length === 0) {
-    container.innerHTML = '<p class="text-sm text-gray-500 italic">Crea usuarios de prueba para comenzar</p>';
-    return;
-  }
-  container.innerHTML = testUsers.map((user, idx) => {
-    const co       = companies.find(c => c.id === user.company_id);
-    const initials = user.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-    const isCurrent = currentUser && currentUser.email === user.email;
-    return `
-      <div class="flex items-center justify-between p-3 rounded-lg ${isCurrent ? 'bg-blue-100 border-2 border-blue-400' : 'bg-white border border-gray-200'} hover:bg-gray-50 transition">
-        <div class="flex items-center gap-3 flex-1">
-          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold">${initials}</div>
-          <div>
-            <p class="text-sm font-semibold text-gray-800">${user.name}</p>
-            <p class="text-xs text-gray-500">${user.email} · ${co?.name || 'N/A'}</p>
-          </div>
-        </div>
-        <div class="flex items-center gap-2 shrink-0">
-          ${isCurrent ? '<span class="text-xs font-bold text-blue-600 bg-blue-200 px-2 py-1 rounded">ACTIVO</span>' : ''}
-          <button onclick="impersonateUser(${idx})" class="px-3 py-1.5 rounded-lg ${isCurrent ? 'bg-blue-600 text-white' : 'border border-blue-300 text-blue-600 hover:bg-blue-50'} text-xs font-semibold transition">
-            ${isCurrent ? '✓ Usando' : 'Usar'}
-          </button>
-          <button onclick="deleteTestUser(${idx})" class="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition">
-            <i data-lucide="trash-2" class="w-4 h-4"></i>
-          </button>
-        </div>
-      </div>`;
-  }).join('');
-  lucide.createIcons();
-}
-
-function showAddTestUserModal() {
-  document.getElementById('add-test-user-modal').classList.remove('hidden');
-  ['test-user-name', 'test-user-email', 'test-user-dept'].forEach(id => { document.getElementById(id).value = ''; });
-  document.getElementById('test-user-role').value = 'employee';
-}
-
-function closeAddTestUserModal() { document.getElementById('add-test-user-modal').classList.add('hidden'); }
-
-function createTestUser() {
-  const name  = document.getElementById('test-user-name').value.trim();
-  const email = document.getElementById('test-user-email').value.trim();
-  const dept  = document.getElementById('test-user-dept').value.trim() || 'General';
-  const role  = document.getElementById('test-user-role').value;
-
-  if (!name || !email) { showErrorToast('Por favor completa nombre y email'); return; }
-  const company = getCompanyFromEmail(email);
-  if (!company) { showErrorToast('Email inválido. Usa un dominio conocido.'); return; }
-
-  testUsers.push({ name, email, password: 'password123', department: dept, company_id: company.id, role: role || getUserRole(email), points_to_give: 100, points_to_redeem: 500 });
-  closeAddTestUserModal();
-  renderImpersonationList();
-  showSuccessToast(`${name} agregado como usuario de prueba`);
-}
-
-function deleteTestUser(idx) {
-  testUsers.splice(idx, 1);
-  renderImpersonationList();
-}
-
-function impersonateUser(idx) {
-  if (idx < 0 || idx >= testUsers.length) return;
-  currentUser = { ...testUsers[idx], user_id: testUsers[idx].email };
-  isLoggedIn  = true;
-  document.getElementById('login-page').classList.add('hidden');
-  document.getElementById('app').classList.remove('hidden');
-  filterEmployeesByCompany();
-  renderEmployeesList();
-  renderImpersonationList();
-  updateAdminVisibility();
-  updateProfileDisplay();
-  updatePointsDisplay();
-  showSuccessToast(`Simulando como: ${currentUser.name}`);
-  lucide.createIcons();
-}
 
 function impersonateEmployee(empBackendId) {
   if (currentUser?.role !== 'superadmin') { showErrorToast('Solo superadmin puede impersonar empleados'); return; }
@@ -1033,6 +1118,8 @@ function impersonateEmployee(empBackendId) {
     points_to_redeem: emp.points_to_redeem, __backendId: emp.__backendId
   };
 
+  document.body.classList.remove('is-superadmin');
+  updateAdminVisibility();
   updateImpersonationBanner();
   closeAdminPage();
 
@@ -1054,6 +1141,7 @@ function impersonateEmployee(empBackendId) {
   renderEmployeesList();
   showSuccessToast(`Usando cuenta de: ${emp.name}`);
   switchPage('home');
+  renderFeed(true);
   lucide.createIcons();
 }
 
@@ -1063,11 +1151,11 @@ function updateImpersonationBanner() {
   if (currentUser && originalSuperadminUser && currentUser.email !== originalSuperadminUser.email) {
     banner.classList.remove('hidden');
     userInfo.textContent = `Actualmente ves la plataforma como: ${currentUser.name}`;
-    document.getElementById('topnav').style.top = '60px';
+    document.getElementById('app').style.paddingTop = banner.offsetHeight + 'px';
   } else {
     banner.classList.add('hidden');
     originalSuperadminUser = null;
-    document.getElementById('topnav').style.top = '0';
+    document.getElementById('app').style.paddingTop = '0';
   }
 }
 
@@ -1075,6 +1163,7 @@ function returnToSuperadmin() {
   if (!originalSuperadminUser) { showErrorToast('No hay cuenta de superadmin para volver'); return; }
   currentUser = { ...originalSuperadminUser };
   originalSuperadminUser = null;
+  document.body.classList.add('is-superadmin');
   filterEmployeesByCompany();
   renderEmployeesList();
   updateImpersonationBanner();
@@ -1086,6 +1175,7 @@ function returnToSuperadmin() {
   document.getElementById('welcome-text').textContent = `¡Hola, ${firstName}! 👋`;
   showSuccessToast(`Volviste a tu cuenta: ${currentUser.name}`);
   switchPage('home');
+  renderFeed(true);
   lucide.createIcons();
 }
 
@@ -1752,7 +1842,17 @@ function buildFeedCard(rec) {
           <p class="text-sm"><span class="font-bold text-gray-800">${senderName}</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">${recipientName}</span></p>
           <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> ${formatTimeAgo(rec.created_at)} · <span class="text-violet-500 font-medium">${rec.program}</span></p>
         </div>
-        <span class="shrink-0 bg-gradient-to-r ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${rec.points} pts</span>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="bg-gradient-to-r ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${rec.points} pts</span>
+          <div class="feed-admin-menu relative">
+            <button onclick="toggleFeedMenu(event,'${rec.id}')" class="p-1 rounded-lg hover:bg-gray-100 transition text-gray-400 hover:text-gray-600 font-bold text-base leading-none">···</button>
+            <div id="feedmenu-${rec.id}" class="hidden absolute right-0 top-7 bg-white border border-gray-100 rounded-xl shadow-lg py-1 min-w-[140px] z-10">
+              <button onclick="openDeleteRecognitionModal('${rec.id}')" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left">
+                🗑️ Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
       <p class="text-sm text-gray-700 leading-relaxed">${rec.message || ''}</p>
     </div>
@@ -1779,6 +1879,45 @@ function buildFeedCard(rec) {
   return card;
 }
 
+// ── Feed card menu (superadmin) ───────────
+const isSuperadmin = () => currentUser?.role === 'superadmin';
+
+function toggleFeedMenu(e, id) {
+  if (!isSuperadmin()) return;
+  e.stopPropagation();
+  const menu = document.getElementById(`feedmenu-${id}`);
+  const isOpen = !menu.classList.contains('hidden');
+  document.querySelectorAll('[id^="feedmenu-"]').forEach(m => m.classList.add('hidden'));
+  if (!isOpen) menu.classList.remove('hidden');
+}
+document.addEventListener('click', () => {
+  document.querySelectorAll('[id^="feedmenu-"]').forEach(m => m.classList.add('hidden'));
+});
+
+let _deletingRecognitionId = null;
+
+function openDeleteRecognitionModal(id) {
+  if (!isSuperadmin()) return;
+  _deletingRecognitionId = id;
+  document.getElementById('delete-recognition-modal').classList.remove('hidden');
+  lucide.createIcons();
+}
+
+function closeDeleteRecognitionModal() {
+  document.getElementById('delete-recognition-modal').classList.add('hidden');
+  _deletingRecognitionId = null;
+}
+
+async function confirmDeleteRecognition() {
+  if (!isSuperadmin()) { showErrorToast('Sin permisos para eliminar reconocimientos'); return; }
+  if (!_deletingRecognitionId) return;
+  const { isOk } = await window.recognitionSdk.delete(_deletingRecognitionId);
+  if (!isOk) { showErrorToast('Error al eliminar el reconocimiento'); return; }
+  closeDeleteRecognitionModal();
+  await renderFeed(true);
+  showSuccessToast('Reconocimiento eliminado');
+}
+
 async function renderFeed(reset = true) {
   const container = document.getElementById('feed-container');
   if (!container) return;
@@ -1789,7 +1928,10 @@ async function renderFeed(reset = true) {
     lucide.createIcons();
   }
 
-  const { isOk, data } = await window.recognitionSdk.list(feedOffset, FEED_LIMIT);
+  const isImpersonating = !!originalSuperadminUser;
+  const isSuperadminView = currentUser?.role === 'superadmin' && !isImpersonating;
+  const companyFilter = isSuperadminView ? null : currentUser?.company_id;
+  const { isOk, data } = await window.recognitionSdk.list(feedOffset, FEED_LIMIT, companyFilter);
 
   if (reset) container.innerHTML = '';
   document.getElementById('load-more-feed')?.remove();

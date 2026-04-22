@@ -1,5 +1,13 @@
 * { font-family: 'Plus Jakarta Sans', sans-serif; }
 
+/* Los menús de eliminación del feed solo son visibles para superadmin */
+.feed-admin-menu { display: none !important; }
+body.is-superadmin .feed-admin-menu { display: block !important; }
+
+/* Links de admin/analytics solo visibles para admin y superadmin */
+#admin-nav-link, #analytics-nav-link { display: none !important; }
+body.is-admin #admin-nav-link, body.is-admin #analytics-nav-link { display: flex !important; }
+
 html, body { height: 100%; margin: 0; box-sizing: border-box; overflow-x: hidden; }
 
 .feed-card { animation: slideUp 0.4s ease both; }
