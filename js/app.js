@@ -1150,13 +1150,7 @@ function impersonateEmployee(empBackendId) {
   if (avatarDiv) avatarDiv.textContent = initials;
   document.getElementById('welcome-text').textContent = `¡Hola, ${firstName}! 👋`;
 
-  document.querySelector('.points-card').innerHTML = `
-    <div class="flex items-center gap-2 mb-4"><i data-lucide="coins" class="w-5 h-5"></i> <span class="text-sm font-medium opacity-90">Mis puntos</span></div>
-    <div class="flex gap-4">
-      <div class="flex-1"><p class="text-2xl font-extrabold">${emp.points_to_give}</p><p class="text-xs opacity-80 mt-0.5">Para dar</p></div>
-      <div class="w-px bg-white/30"></div>
-      <div class="flex-1"><p class="text-2xl font-extrabold">${emp.points_to_redeem}</p><p class="text-xs opacity-80 mt-0.5">Para canjear</p></div>
-    </div>`;
+  updatePointsDisplay();
 
   filterEmployeesByCompany();
   renderEmployeesList();
@@ -1965,15 +1959,9 @@ async function renderFeed(reset = true) {
   const companyFilter = isSuperadminView ? null : currentUser?.company_id;
   const { isOk, data: rawData } = await window.recognitionSdk.list(feedOffset, FEED_LIMIT, companyFilter);
 
-  // DEBUG — remove after diagnosis
-  console.log('[Feed] currentUser:', currentUser?.email, '| role:', currentUser?.role, '| company_id:', currentUser?.company_id);
-  console.log('[Feed] isImpersonating:', isImpersonating, '| companyFilter:', companyFilter);
-  console.log('[Feed] rawData count:', rawData?.length, '| sample company_ids:', rawData?.slice(0,5).map(r => r.company_id));
   const companyMemberIds = companyFilter
     ? new Set(allUsers.filter(u => u.company_id === companyFilter).map(u => u.__backendId))
     : null;
-  console.log('[Feed] companyMemberIds size:', companyMemberIds?.size, '| allUsers count:', allUsers.length);
-  console.log('[Feed] sample from_user ids in rawData:', rawData?.slice(0,5).map(r => r.from_user?.id));
 
   let data = rawData || [];
   if (companyFilter && companyMemberIds) {
@@ -1981,7 +1969,6 @@ async function renderFeed(reset = true) {
       companyMemberIds.has(r.from_user?.id) || companyMemberIds.has(r.to_user?.id)
     );
   }
-  console.log('[Feed] after filter count:', data.length);
 
   if (reset) container.innerHTML = '';
   document.getElementById('load-more-feed')?.remove();
