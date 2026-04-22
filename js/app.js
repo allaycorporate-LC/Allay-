@@ -1965,11 +1965,18 @@ async function renderFeed(reset = true) {
   const companyFilter = isSuperadminView ? null : currentUser?.company_id;
   const { isOk, data: rawData } = await window.recognitionSdk.list(feedOffset, FEED_LIMIT, companyFilter);
 
-  // Secondary client-side filter: removes records whose company_id doesn't match,
-  // catching cases where the DB field is null or was set incorrectly.
-  const data = (companyFilter && rawData)
-    ? rawData.filter(r => r.company_id === companyFilter)
-    : (rawData || []);
+  // Client-side filter by user membership: more reliable than rec.company_id
+  // (which can be null/wrong for old records). Show a recognition only if
+  // the sender or receiver is a member of the current user's company.
+  let data = rawData || [];
+  if (companyFilter) {
+    const companyMemberIds = new Set(
+      allUsers.filter(u => u.company_id === companyFilter).map(u => u.__backendId)
+    );
+    data = data.filter(r =>
+      companyMemberIds.has(r.from_user?.id) || companyMemberIds.has(r.to_user?.id)
+    );
+  }
 
   if (reset) container.innerHTML = '';
   document.getElementById('load-more-feed')?.remove();
