@@ -1,0 +1,1401 @@
+<!doctype html>
+<html lang="es" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Allayss - Reconocimiento Interno</title>
+
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="_sdk/element_sdk.js"></script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+
+  <!-- Tailwind custom colors — must stay inline so the CDN picks them up -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            celeste: { 50:'#f0f8ff',100:'#e0f0ff',200:'#c8e4ff',300:'#b0d8ff',400:'#a8cdff',500:'#8ab8ff',600:'#6da3ff',700:'#5080d0',800:'#3d5fa8',900:'#2a3f7a' },
+            rosita:  { 50:'#fff4f9',100:'#ffe8f4',200:'#ffcce5',300:'#ffb5d9',400:'#ffa3d3',500:'#ff7fb3',600:'#ff5799',700:'#ff2b7f',800:'#e00a5c',900:'#b20550' },
+            lila:    { 50:'#faf5ff',100:'#f3e8ff',200:'#e9d5ff',300:'#d8b4fe',400:'#c084fc',500:'#a855f7' }
+          }
+        }
+      }
+    }
+  </script>
+
+  <script src="_sdk/data_sdk.js" type="text/javascript"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.js"></script>
+</head>
+<body class="h-full bg-gray-50">
+
+<!-- ══════════════════════════════════════
+     LOGIN PAGE
+══════════════════════════════════════ -->
+<div id="login-page" class="fixed inset-0 z-[200] bg-gradient-to-br from-celeste-50 via-white to-rosita-50 overflow-y-auto">
+  <div class="flex min-h-full items-center justify-center py-12 px-4">
+  <div class="w-full max-w-md">
+    <!-- Logo -->
+    <div class="text-center mb-8">
+      <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-celeste-400 to-rosita-400 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-celeste-200">
+        <i data-lucide="sparkles" class="w-7 h-7 text-white"></i>
+      </div>
+      <h1 class="text-3xl font-bold bg-gradient-to-r from-celeste-500 to-rosita-400 bg-clip-text text-transparent">Allays</h1>
+      <p class="text-gray-500 mt-2">Plataforma de reconocimiento interno</p>
+    </div>
+
+    <!-- Login Card -->
+    <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-8 space-y-6">
+      <div>
+        <h2 class="text-2xl font-bold text-gray-800">Inicia sesión</h2>
+        <p class="text-sm text-gray-500 mt-1">Con tu email corporativo</p>
+      </div>
+
+      <form id="login-form" class="space-y-4" onsubmit="handleLogin(event)">
+        <div>
+          <label for="login-email" class="block text-sm font-semibold text-gray-700 mb-2">Email corporativo</label>
+          <input type="email" id="login-email" placeholder="tu@empresa.com"
+            class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition">
+        </div>
+
+        <div>
+          <label for="login-password" class="block text-sm font-semibold text-gray-700 mb-2">Contraseña</label>
+          <div class="relative">
+            <input type="password" id="login-password" placeholder="••••••••"
+              class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-300 focus:border-transparent transition">
+            <button type="button" onclick="togglePasswordVisibility()" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <i data-lucide="eye" class="w-5 h-5" id="eye-icon"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between text-sm">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" class="w-4 h-4 rounded border-gray-300 accent-celeste-500">
+            <span class="text-gray-600">Recuérdame</span>
+          </label>
+          <a href="#" class="text-celeste-600 hover:text-celeste-700 font-medium transition">¿Olvidaste tu contraseña?</a>
+        </div>
+
+        <div id="login-error" class="hidden p-3 rounded-lg bg-red-50 border border-red-200">
+          <p id="login-error-text" class="text-sm text-red-600"></p>
+        </div>
+
+        <button type="submit" id="login-btn"
+          class="w-full btn-recognize text-white py-3 rounded-xl font-semibold shadow-lg shadow-violet-200 hover:shadow-xl hover:shadow-violet-300 transition-all flex items-center justify-center gap-2">
+          <span>Iniciar sesión</span>
+          <i data-lucide="arrow-right" class="w-4 h-4"></i>
+        </button>
+      </form>
+
+      <!-- Demo credentials -->
+      <div class="pt-4 border-t border-gray-100">
+        <p class="text-xs text-gray-500 mb-3">🧪 <strong>Credenciales de prueba:</strong></p>
+        <div class="space-y-2 text-xs">
+          <p class="text-gray-600"><strong>Superadmin:</strong> maria@superadmin.com / password123</p>
+          <p class="text-gray-600"><strong>Tech Corp (Admin):</strong> carlos.admin@techcorp.com / password123</p>
+          <p class="text-gray-600"><strong>Tech Corp (Employee):</strong> ana@techcorp.com / password123</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-center mt-8">
+      <p class="text-sm text-gray-500">© 2024 Allays. Todos los derechos reservados.</p>
+    </div>
+  </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     IMPERSONATION BANNER
+══════════════════════════════════════ -->
+<div id="impersonation-banner" class="hidden fixed top-0 left-0 right-0 z-[150] bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 md:px-6 py-3 flex items-center justify-between shadow-lg">
+  <div class="flex items-center gap-3">
+    <i data-lucide="alert-circle" class="w-5 h-5 shrink-0"></i>
+    <div>
+      <p class="text-sm font-semibold">Estás simulando como empleado</p>
+      <p id="impersonation-user-info" class="text-xs opacity-90 mt-0.5">Actualmente ves la plataforma como otro usuario</p>
+    </div>
+  </div>
+  <button onclick="returnToSuperadmin()" class="shrink-0 px-4 py-1.5 bg-white text-blue-600 font-semibold text-sm rounded-lg hover:bg-blue-50 transition flex items-center gap-2">
+    <i data-lucide="log-in" class="w-4 h-4"></i> Volver a mi cuenta
+  </button>
+</div>
+
+<!-- ══════════════════════════════════════
+     MAIN APP
+══════════════════════════════════════ -->
+<div id="app" class="h-full w-full flex flex-col overflow-hidden">
+
+  <!-- TOP NAV -->
+  <nav id="topnav" class="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm">
+    <div class="flex items-center justify-between px-4 md:px-6 h-16">
+      <!-- Logo -->
+      <div class="flex items-center gap-2 shrink-0">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-celeste-500 to-rosita-500 flex items-center justify-center cursor-pointer hover:opacity-80 transition"
+             onclick="closeAdminPage(); closeProfilePage(); switchPage('home');">
+          <i data-lucide="sparkles" class="w-5 h-5 text-white"></i>
+        </div>
+        <span id="logo-text"
+          class="text-xl font-bold bg-gradient-to-r from-celeste-500 to-rosita-400 bg-clip-text text-transparent hidden sm:block cursor-pointer hover:opacity-80 transition"
+          onclick="closeAdminPage(); closeProfilePage(); switchPage('home');">Allays</span>
+      </div>
+
+      <!-- Search -->
+      <div class="flex-1 max-w-md mx-4">
+        <div class="relative">
+          <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+          <input type="text" placeholder="Buscar personas, equipos..."
+            class="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 transition">
+        </div>
+      </div>
+
+      <!-- Right actions -->
+      <div class="flex items-center gap-2 shrink-0">
+        <!-- Recognize button (desktop) -->
+        <button id="btn-recognize-top"
+          class="btn-recognize text-white px-4 py-2 rounded-full text-sm font-semibold shadow-lg shadow-celeste-200 hover:shadow-xl hover:shadow-celeste-300 transition-all hidden sm:flex items-center gap-1.5">
+          <i data-lucide="heart" class="w-4 h-4"></i>
+          <span id="recognize-btn-text">Reconocer</span>
+        </button>
+        <!-- Recognize button (mobile) -->
+        <button id="btn-recognize-mobile" class="btn-recognize text-white p-2.5 rounded-full shadow-lg sm:hidden">
+          <i data-lucide="heart" class="w-5 h-5"></i>
+        </button>
+
+        <!-- Notifications -->
+        <div class="relative">
+          <button id="btn-notif" class="p-2 rounded-full hover:bg-gray-100 transition notification-dot" onclick="toggleNotifications(event)">
+            <i data-lucide="bell" class="w-5 h-5 text-gray-600"></i>
+          </button>
+          <!-- Dropdown -->
+          <div id="notifications-dropdown" class="hidden absolute right-0 top-12 w-80 bg-white rounded-xl shadow-xl border border-gray-100 z-50 max-h-96 overflow-hidden flex flex-col">
+            <div class="p-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 class="font-bold text-gray-800">Notificaciones</h3>
+              <button onclick="clearNotifications()" class="text-xs text-gray-400 hover:text-gray-600 transition">Limpiar</button>
+            </div>
+            <div id="notifications-list" class="flex-1 overflow-y-auto space-y-2 p-3">
+              <div class="notif-item p-3 rounded-lg hover:bg-gray-50 cursor-pointer transition border border-transparent hover:border-gray-200">
+                <div class="flex items-start gap-2.5">
+                  <div class="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <i data-lucide="heart" class="w-4 h-4 text-rose-500"></i>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-xs text-gray-700"><span class="font-semibold">Carlos Ruiz</span> reaccionó a tu reconocimiento</p>
+                    <p class="text-[11px] text-gray-400 mt-0.5">Hace 1 hora</p>
+                  </div>
+                </div>
+              </div>
+              <div class="notif-item p-3 rounded-lg hover:bg-gray-50 cursor-pointer transition border border-transparent hover:border-gray-200">
+                <div class="flex items-start gap-2.5">
+                  <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <i data-lucide="message-circle" class="w-4 h-4 text-blue-500"></i>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-xs text-gray-700"><span class="font-semibold">Ana López</span> comentó en tu reconocimiento</p>
+                    <p class="text-[11px] text-gray-600">"¡Totalmente merecido! María es increíble 💜"</p>
+                    <p class="text-[11px] text-gray-400 mt-0.5">Hace 2 horas</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="p-3 border-t border-gray-100 text-center">
+              <button class="text-xs text-violet-600 hover:text-violet-700 font-semibold transition" onclick="openNotificationsPage()">Ver todas las notificaciones →</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Profile -->
+        <div class="relative">
+          <button id="btn-profile" class="flex items-center gap-2 p-1 rounded-full hover:bg-gray-100 transition">
+            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-lila-400 to-rosa-400 flex items-center justify-center text-white text-sm font-bold">M</div>
+            <i data-lucide="chevron-down" class="w-4 h-4 text-gray-500 hidden sm:block"></i>
+          </button>
+          <!-- Dropdown -->
+          <div id="profile-dropdown" class="hidden absolute right-0 top-12 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50">
+            <div class="px-4 py-2 border-b border-gray-100">
+              <p id="profile-name" class="font-semibold text-sm text-gray-800">María González</p>
+              <p id="profile-email" class="text-xs text-gray-500">maria@empresa.com</p>
+            </div>
+            <button class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-violet-50 text-sm text-gray-700 transition"
+              onclick="openProfilePage(); document.getElementById('profile-dropdown').classList.add('hidden');">
+              <i data-lucide="user" class="w-4 h-4 text-violet-500"></i> Editar perfil
+            </button>
+            <button class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-violet-50 text-sm text-gray-700 transition"
+              onclick="openNotificationsPage(); document.getElementById('profile-dropdown').classList.add('hidden');">
+              <i data-lucide="bell" class="w-4 h-4 text-violet-500"></i> Notificaciones
+            </button>
+            <a href="#" class="flex items-center gap-3 px-4 py-2.5 hover:bg-violet-50 text-sm text-gray-700 transition" onclick="event.preventDefault()">
+              <i data-lucide="shopping-bag" class="w-4 h-4 text-violet-500"></i> Carrito de compras
+            </a>
+            <div class="border-t border-gray-100 mt-1 pt-1">
+              <a href="#" class="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 text-sm text-red-600 transition" onclick="event.preventDefault(); logout();">
+                <i data-lucide="log-out" class="w-4 h-4"></i> Cerrar sesión
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- MAIN LAYOUT -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- LEFT SIDEBAR — NAVIGATION -->
+    <aside id="left-sidebar" class="hidden md:flex flex-col border-r border-gray-200 z-[45]" style="width:16rem;min-width:16rem;flex-shrink:0;overflow:hidden;transition:width 0.25s ease,min-width 0.25s ease;position:relative;background:white;">
+
+      <!-- Waves background -->
+      <div class="pointer-events-none select-none" style="position:absolute;bottom:0;left:0;right:0;height:220px;z-index:0;">
+        <svg viewBox="0 0 256 220" xmlns="http://www.w3.org/2000/svg"
+             style="width:100%;height:100%;" preserveAspectRatio="xMinYMax meet">
+          <path d="M-10 220 C 20 190, 10 125, 60 100 C 100 78, 120 138, 160 118 C 195 100, 210 35, 270 18 L 270 220 Z"
+                fill="#d1d5db" opacity="0.45"/>
+          <path d="M-10 220 C 15 195, 5 135, 50 112 C 88 92, 112 150, 148 132 C 182 116, 200 54, 265 38 L 265 220 Z"
+                fill="#a855f7" opacity="0.35"/>
+          <path d="M-10 220 C 10 200, 2 145, 42 124 C 78 106, 104 162, 138 145 C 170 130, 190 72, 262 58 L 262 220 Z"
+                fill="#ffa3d3" opacity="0.5"/>
+          <path d="M-10 220 C 8 206, -2 155, 34 136 C 68 118, 96 172, 128 156 C 158 142, 180 88, 260 76 L 260 220 Z"
+                fill="#a8cdff" opacity="0.6"/>
+        </svg>
+      </div>
+
+      <nav class="flex-1 p-4 space-y-1 overflow-hidden" style="position:relative;z-index:1;">
+        <div class="nav-section-divider px-3 py-2">
+          <p class="nav-section-label text-xs font-bold text-gray-400 uppercase tracking-wider">Principal</p>
+        </div>
+
+        <a href="#" data-tip="Inicio" class="nav-link active flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-violet-600 bg-violet-50 transition"
+           onclick="event.preventDefault(); sidebarNav(() => switchPage('home'))">
+          <i data-lucide="home" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Inicio</span>
+        </a>
+        <a href="#" data-tip="Feed" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+           onclick="event.preventDefault(); sidebarNav(() => switchPage('feed'))">
+          <i data-lucide="rss" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Feed</span>
+        </a>
+        <a href="#" data-tip="Reconocer" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+           onclick="event.preventDefault(); sidebarNav(() => openModal())">
+          <i data-lucide="heart" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Reconocer</span>
+        </a>
+
+        <div class="nav-section-divider px-3 py-2 mt-4">
+          <p class="nav-section-label text-xs font-bold text-gray-400 uppercase tracking-wider">Gestión</p>
+        </div>
+
+        <a href="#" data-tip="Store" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+           onclick="event.preventDefault(); sidebarNav(() => switchPage('store'))">
+          <i data-lucide="shopping-bag" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Store</span>
+        </a>
+        <a href="#" data-tip="Aprobaciones" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+           onclick="event.preventDefault(); sidebarNav(() => switchPage('approvals'))">
+          <i data-lucide="check-square" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Aprobaciones</span>
+        </a>
+        <a href="#" data-tip="Programas" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+           onclick="event.preventDefault(); sidebarNav(() => switchPage('programs'))">
+          <i data-lucide="target" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Programas</span>
+        </a>
+        <a href="#" data-tip="Gestión de puntos" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+           onclick="event.preventDefault(); sidebarNav(() => switchPage('points'))">
+          <i data-lucide="coins" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Gestión de puntos</span>
+        </a>
+
+        <div class="nav-section-divider px-3 py-2 mt-4">
+          <p class="nav-section-label text-xs font-bold text-gray-400 uppercase tracking-wider">Cuenta</p>
+        </div>
+
+        <a href="#" data-tip="Configuración" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+           onclick="event.preventDefault(); sidebarNav(() => openProfilePage())">
+          <i data-lucide="settings" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Configuración</span>
+        </a>
+        <a id="admin-nav-link" href="#" data-tip="Administrador" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition hidden"
+           onclick="event.preventDefault(); sidebarNav(() => openAdminPage())">
+          <i data-lucide="lock" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Administrador</span>
+        </a>
+        <a id="analytics-nav-link" href="#" data-tip="Analytics" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition hidden"
+           onclick="event.preventDefault(); sidebarNav(() => openAnalyticsPage())">
+          <i data-lucide="bar-chart-2" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Analytics</span>
+        </a>
+      </nav>
+
+      <!-- Toggle button -->
+      <div class="border-t border-gray-100 p-2 shrink-0" style="position:relative;z-index:1;background:transparent;">
+        <button id="sidebar-toggle-btn" onclick="toggleSidebar()"
+          class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition whitespace-nowrap overflow-hidden">
+          <i data-lucide="chevrons-left" id="sidebar-toggle-icon" class="w-4 h-4 shrink-0"></i>
+          <span id="sidebar-toggle-label" class="nav-label">Plegar</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- FEED -->
+    <main class="flex-1 min-w-0 overflow-y-auto p-4 md:p-6 relative">
+
+      <!-- HOME STRIP -->
+      <div id="home-strip" class="mb-4 flex gap-3" style="min-height:8rem">
+
+        <!-- Welcome + Reconocer -->
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex-1 min-w-0 flex flex-col justify-between">
+          <div>
+            <p id="welcome-text" class="text-2xl font-extrabold text-gray-900">¡Hola, María! 👋</p>
+            <p class="text-sm text-gray-400 mt-1.5">Lo bueno se potencia cuando se comparte.</p>
+          </div>
+          <button onclick="openModal()" class="btn-recognize self-start mt-3 py-2 px-5 rounded-xl text-white font-bold text-sm shadow-md hover:shadow-lg transition flex items-center gap-2">
+            <i data-lucide="sparkles" class="w-4 h-4"></i> Reconocer
+          </button>
+        </div>
+
+        <!-- Para dar → abre reconocimiento -->
+        <button onclick="openModal()" class="flex-1 rounded-2xl p-5 flex flex-col justify-between text-white shadow-sm hover:brightness-95 transition" style="background-color:#ffa3d3">
+          <div class="flex items-center gap-1.5">
+            <i data-lucide="gift" class="w-4 h-4"></i>
+            <span class="text-sm font-semibold">Para dar</span>
+          </div>
+          <div class="text-left">
+            <p id="pts-give" class="text-4xl font-black leading-none">150</p>
+            <p class="text-xs opacity-80 mt-1">pts disponibles</p>
+          </div>
+        </button>
+
+        <!-- Para canjear → abre store -->
+        <button onclick="openStore()" class="flex-1 rounded-2xl p-5 flex flex-col justify-between text-white shadow-sm hover:brightness-95 transition" style="background-color:#a8cdff">
+          <div class="flex items-center gap-1.5">
+            <i data-lucide="shopping-bag" class="w-4 h-4"></i>
+            <span class="text-sm font-semibold">Para canjear</span>
+          </div>
+          <div class="text-left">
+            <p id="pts-redeem" class="text-4xl font-black leading-none">420</p>
+            <p class="text-xs opacity-80 mt-1">pts acumulados</p>
+          </div>
+        </button>
+
+      </div>
+
+      <!-- CONTENT: feed + right column -->
+      <div class="flex gap-4">
+
+        <!-- Feed (majority) -->
+        <div class="min-w-0 space-y-4" style="flex:0 1 58%;">
+
+        <!-- Quick recognize prompt -->
+        <div class="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm flex items-center gap-3 cursor-pointer hover:shadow-md transition" id="quick-recognize">
+          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-lila-400 to-rosa-400 flex items-center justify-center text-white font-bold shrink-0">M</div>
+          <div class="flex-1 bg-gray-50 rounded-full px-4 py-2.5 text-sm text-gray-400">¿A quién querés reconocer hoy? ✨</div>
+          <div class="flex gap-1">
+            <button class="p-2 rounded-full hover:bg-violet-50 transition"><i data-lucide="image" class="w-5 h-5 text-violet-400"></i></button>
+            <button class="p-2 rounded-full hover:bg-rosa-50 transition"><i data-lucide="smile" class="w-5 h-5 text-rosa-400"></i></button>
+          </div>
+        </div>
+
+        <!-- Feed cards -->
+        <div id="feed-container" class="space-y-5">
+
+          <!-- Card 1 -->
+          <article class="feed-card bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition">
+            <div class="p-5">
+              <div class="flex items-start gap-3 mb-3">
+                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-lila-400 flex items-center justify-center text-white font-bold shrink-0">C</div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm"><span class="font-bold text-gray-800">Carlos Ruiz</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">María González</span></p>
+                  <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> Hace 30 min · <span class="text-violet-500 font-medium">🏆 Trabajo en equipo</span></p>
+                </div>
+                <span class="shrink-0 bg-gradient-to-r from-violet-500 to-rosa-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">+25 pts</span>
+              </div>
+              <p class="text-sm text-gray-700 leading-relaxed">María lideró la presentación del proyecto con una dedicación increíble. Su capacidad para coordinar al equipo y mantener todo en orden fue clave para el éxito. ¡Gracias por tu compromiso! 🚀</p>
+            </div>
+            <div class="bg-gradient-to-r from-violet-50 to-rosa-50 px-5 py-3 flex items-center justify-between">
+              <div class="flex gap-3">
+                <button class="reaction-btn flex items-center gap-1.5 text-sm text-gray-500 hover:text-rosa-500 transition" onclick="toggleReaction(this,'❤️')"><span class="text-base">❤️</span><span class="count">12</span></button>
+                <button class="reaction-btn flex items-center gap-1.5 text-sm text-gray-500 hover:text-violet-500 transition" onclick="toggleReaction(this,'🎉')"><span class="text-base">🎉</span><span class="count">8</span></button>
+                <button class="reaction-btn flex items-center gap-1.5 text-sm text-gray-500 hover:text-lila-500 transition" onclick="toggleReaction(this,'👏')"><span class="text-base">👏</span><span class="count">5</span></button>
+              </div>
+              <button class="flex items-center gap-1.5 text-sm text-gray-400 hover:text-violet-600 transition" onclick="toggleComments(this)"><i data-lucide="message-circle" class="w-4 h-4"></i> 3</button>
+            </div>
+            <div class="comments-section hidden border-t border-gray-100">
+              <div class="p-4 space-y-3">
+                <div class="flex items-start gap-2.5">
+                  <div class="w-7 h-7 rounded-full bg-gradient-to-br from-lila-300 to-violet-400 flex items-center justify-center text-white text-xs font-bold shrink-0">A</div>
+                  <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1"><p class="text-xs font-semibold text-gray-700">Ana López</p><p class="text-xs text-gray-600 mt-0.5">¡Totalmente merecido! María es increíble 💜</p></div>
+                </div>
+                <div class="flex items-start gap-2.5">
+                  <div class="w-7 h-7 rounded-full bg-gradient-to-br from-rosa-300 to-rosa-500 flex items-center justify-center text-white text-xs font-bold shrink-0">L</div>
+                  <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1"><p class="text-xs font-semibold text-gray-700">Lucas Méndez</p><p class="text-xs text-gray-600 mt-0.5">Gran trabajo en equipo 🙌</p></div>
+                </div>
+              </div>
+              <div class="px-4 pb-3 flex gap-2">
+                <input type="text" placeholder="Escribí un comentario..." class="flex-1 text-xs bg-gray-50 border border-gray-200 rounded-full px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300">
+                <button class="p-2 rounded-full bg-violet-500 text-white hover:bg-violet-600 transition" onclick="addComment(this)"><i data-lucide="send" class="w-3.5 h-3.5"></i></button>
+              </div>
+            </div>
+          </article>
+
+          <!-- Card 2 -->
+          <article class="feed-card bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition">
+            <div class="p-5">
+              <div class="flex items-start gap-3 mb-3">
+                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-rosa-400 to-rosa-500 flex items-center justify-center text-white font-bold shrink-0">A</div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm"><span class="font-bold text-gray-800">Ana López</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">Diego Torres</span></p>
+                  <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> Hace 2 horas · <span class="text-rosa-500 font-medium">💡 Innovación</span></p>
+                </div>
+                <span class="shrink-0 bg-gradient-to-r from-lila-500 to-violet-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">+30 pts</span>
+              </div>
+              <p class="text-sm text-gray-700 leading-relaxed">Diego propuso una automatización que nos ahorró horas de trabajo manual cada semana. Su pensamiento creativo y proactivo es un ejemplo para todos. ¡Seguí así! 💡✨</p>
+            </div>
+            <div class="bg-gradient-to-r from-lila-50 to-violet-50 px-5 py-3 flex items-center justify-between">
+              <div class="flex gap-3">
+                <button class="reaction-btn flex items-center gap-1.5 text-sm text-gray-500 hover:text-rosa-500 transition" onclick="toggleReaction(this,'❤️')"><span class="text-base">❤️</span><span class="count">18</span></button>
+                <button class="reaction-btn flex items-center gap-1.5 text-sm text-gray-500 hover:text-violet-500 transition" onclick="toggleReaction(this,'🎉')"><span class="text-base">🎉</span><span class="count">14</span></button>
+                <button class="reaction-btn flex items-center gap-1.5 text-sm text-gray-500 hover:text-lila-500 transition" onclick="toggleReaction(this,'💡')"><span class="text-base">💡</span><span class="count">9</span></button>
+              </div>
+              <button class="flex items-center gap-1.5 text-sm text-gray-400 hover:text-violet-600 transition" onclick="toggleComments(this)"><i data-lucide="message-circle" class="w-4 h-4"></i> 5</button>
+            </div>
+            <div class="comments-section hidden border-t border-gray-100">
+              <div class="p-4 space-y-3">
+                <div class="flex items-start gap-2.5">
+                  <div class="w-7 h-7 rounded-full bg-gradient-to-br from-violet-400 to-lila-400 flex items-center justify-center text-white text-xs font-bold shrink-0">C</div>
+                  <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1"><p class="text-xs font-semibold text-gray-700">Carlos Ruiz</p><p class="text-xs text-gray-600 mt-0.5">¡Diego es un crack! Esa automatización cambió todo 🔥</p></div>
+                </div>
+              </div>
+              <div class="px-4 pb-3 flex gap-2">
+                <input type="text" placeholder="Escribí un comentario..." class="flex-1 text-xs bg-gray-50 border border-gray-200 rounded-full px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300">
+                <button class="p-2 rounded-full bg-violet-500 text-white hover:bg-violet-600 transition" onclick="addComment(this)"><i data-lucide="send" class="w-3.5 h-3.5"></i></button>
+              </div>
+            </div>
+          </article>
+
+          <!-- Card 3 -->
+          <article class="feed-card bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition">
+            <div class="p-5">
+              <div class="flex items-start gap-3 mb-3">
+                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-lila-400 to-violet-500 flex items-center justify-center text-white font-bold shrink-0">L</div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm"><span class="font-bold text-gray-800">Lucas Méndez</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">Sofía Herrera</span></p>
+                  <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> Hace 5 horas · <span class="text-lila-500 font-medium">🤝 Colaboración</span></p>
+                </div>
+                <span class="shrink-0 bg-gradient-to-r from-rosa-500 to-lila-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">+20 pts</span>
+              </div>
+              <p class="text-sm text-gray-700 leading-relaxed">Sofía siempre está dispuesta a ayudar. Esta semana me guió con el onboarding del nuevo cliente y todo salió perfecto. ¡Sos una genia! 🌟</p>
+            </div>
+            <div class="bg-gradient-to-r from-rosa-50 to-lila-50 px-5 py-3 flex items-center justify-between">
+              <div class="flex gap-3">
+                <button class="reaction-btn flex items-center gap-1.5 text-sm text-gray-500 hover:text-rosa-500 transition" onclick="toggleReaction(this,'❤️')"><span class="text-base">❤️</span><span class="count">7</span></button>
+                <button class="reaction-btn flex items-center gap-1.5 text-sm text-gray-500 hover:text-violet-500 transition" onclick="toggleReaction(this,'🎉')"><span class="text-base">🎉</span><span class="count">4</span></button>
+                <button class="reaction-btn flex items-center gap-1.5 text-sm text-gray-500 hover:text-lila-500 transition" onclick="toggleReaction(this,'🤝')"><span class="text-base">🤝</span><span class="count">11</span></button>
+              </div>
+              <button class="flex items-center gap-1.5 text-sm text-gray-400 hover:text-violet-600 transition" onclick="toggleComments(this)"><i data-lucide="message-circle" class="w-4 h-4"></i> 1</button>
+            </div>
+            <div class="comments-section hidden border-t border-gray-100">
+              <div class="p-4 space-y-3">
+                <div class="flex items-start gap-2.5">
+                  <div class="w-7 h-7 rounded-full bg-gradient-to-br from-rosa-300 to-rosa-500 flex items-center justify-center text-white text-xs font-bold shrink-0">M</div>
+                  <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1"><p class="text-xs font-semibold text-gray-700">María González</p><p class="text-xs text-gray-600 mt-0.5">Sofía es lo más 💜</p></div>
+                </div>
+              </div>
+              <div class="px-4 pb-3 flex gap-2">
+                <input type="text" placeholder="Escribí un comentario..." class="flex-1 text-xs bg-gray-50 border border-gray-200 rounded-full px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300">
+                <button class="p-2 rounded-full bg-violet-500 text-white hover:bg-violet-600 transition" onclick="addComment(this)"><i data-lucide="send" class="w-3.5 h-3.5"></i></button>
+              </div>
+            </div>
+          </article>
+
+        </div><!-- /feed-container -->
+        </div><!-- /feed col -->
+
+        <!-- Right column: activity + top -->
+        <div id="home-right-col" class="shrink-0 space-y-3" style="flex:0 0 38%;max-width:38%;">
+
+          <!-- Actividad reciente -->
+          <div class="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+            <h3 class="font-semibold text-xs text-gray-700 mb-2.5 flex items-center gap-1.5">
+              <i data-lucide="activity" class="w-3.5 h-3.5 text-violet-500"></i> Actividad reciente
+            </h3>
+            <div class="space-y-2.5">
+              <div class="flex items-start gap-2">
+                <div class="w-6 h-6 rounded-full bg-pink-100 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="heart" class="w-3 h-3 text-pink-400"></i></div>
+                <div><p class="text-xs text-gray-700"><span class="font-semibold">Carlos</span> te reconoció</p><p class="text-[10px] text-gray-400">Hace 2 horas</p></div>
+              </div>
+              <div class="flex items-start gap-2">
+                <div class="w-6 h-6 rounded-full bg-violet-100 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="gift" class="w-3 h-3 text-violet-500"></i></div>
+                <div><p class="text-xs text-gray-700">Canjeaste <span class="font-semibold">Gift Card</span></p><p class="text-[10px] text-gray-400">Ayer</p></div>
+              </div>
+              <div class="flex items-start gap-2">
+                <div class="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="star" class="w-3 h-3 text-purple-400"></i></div>
+                <div><p class="text-xs text-gray-700">Recibiste <span class="font-semibold">+50 puntos</span></p><p class="text-[10px] text-gray-400">Hace 3 días</p></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Top reconocedores -->
+          <div class="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+            <h3 class="font-semibold text-xs text-gray-700 mb-2.5 flex items-center gap-1.5">
+              <i data-lucide="trophy" class="w-3.5 h-3.5 text-yellow-500"></i> Top reconocedores
+            </h3>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-yellow-500 w-4">1</span>
+                <div class="w-6 h-6 rounded-full bg-gradient-to-br from-violet-400 to-pink-400 flex items-center justify-center text-white text-[10px] font-bold">A</div>
+                <span class="text-xs text-gray-700 flex-1 truncate">Ana López</span>
+                <span class="text-[10px] font-semibold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded-full">32</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-gray-400 w-4">2</span>
+                <div class="w-6 h-6 rounded-full bg-gradient-to-br from-purple-400 to-violet-400 flex items-center justify-center text-white text-[10px] font-bold">C</div>
+                <span class="text-xs text-gray-700 flex-1 truncate">Carlos Ruiz</span>
+                <span class="text-[10px] font-semibold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded-full">28</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-amber-600 w-4">3</span>
+                <div class="w-6 h-6 rounded-full bg-gradient-to-br from-pink-400 to-purple-400 flex items-center justify-center text-white text-[10px] font-bold">M</div>
+                <span class="text-xs text-gray-700 flex-1 truncate">María G.</span>
+                <span class="text-[10px] font-semibold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded-full">24</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Valores más usados -->
+          <div class="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+            <h3 class="font-semibold text-xs text-gray-700 mb-2.5 flex items-center gap-1.5">
+              <i data-lucide="sparkles" class="w-3.5 h-3.5 text-violet-500"></i> Valores más usados
+            </h3>
+            <div id="home-programs-list" class="flex flex-wrap gap-1.5">
+              <span class="text-[10px] text-gray-400">Cargando...</span>
+            </div>
+          </div>
+
+        </div><!-- /right col -->
+
+      </div><!-- /content flex -->
+    </main>
+  </div><!-- /main layout -->
+
+<!-- ══════════════════════════════════════
+     PROGRAMS PAGE
+══════════════════════════════════════ -->
+<div id="programs-page" class="hidden fixed z-40 bg-gray-50 overflow-y-auto flex flex-col">
+  <nav class="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm">
+    <div class="flex items-center gap-3 px-4 md:px-6 h-16">
+      <button onclick="closeProgramsPage()" class="p-2 rounded-full hover:bg-gray-100 transition">
+        <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+      </button>
+      <h2 class="text-lg font-bold text-gray-800">Programas</h2>
+    </div>
+  </nav>
+  <div class="flex-1 p-4 md:p-6">
+    <div class="flex items-center justify-between mb-6">
+      <p class="text-sm text-gray-500">Estos son los valores y programas de reconocimiento activos en tu empresa.</p>
+      <button onclick="openNewProgramModal()" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-celeste-400 to-rosita-400 text-white text-sm font-semibold shadow hover:opacity-90 transition">
+        <i data-lucide="plus" class="w-4 h-4"></i> Nuevo programa
+      </button>
+    </div>
+    <div id="programs-page-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     NEW PROGRAM MODAL
+══════════════════════════════════════ -->
+<div id="new-program-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeNewProgramModal()"></div>
+  <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-100">
+      <h3 id="np-modal-title" class="text-lg font-bold text-gray-800">Nuevo programa</h3>
+      <button onclick="closeNewProgramModal()" class="p-2 rounded-full hover:bg-gray-100 transition">
+        <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+      </button>
+    </div>
+    <form id="new-program-form" class="px-6 py-5 space-y-5" onsubmit="submitNewProgram(event)">
+
+      <!-- Emoji + Nombre -->
+      <div class="flex gap-3 items-start">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1.5">Emoji</label>
+          <button type="button" id="np-emoji-btn" onclick="toggleEmojiPicker()"
+            class="w-14 h-11 rounded-xl border-2 border-gray-200 bg-gray-50 text-2xl flex items-center justify-center hover:border-celeste-400 transition">🏆</button>
+        </div>
+        <div class="flex-1">
+          <label class="block text-sm font-semibold text-gray-700 mb-1.5">Nombre del programa <span class="text-rosita-500">*</span></label>
+          <input id="np-name" type="text" placeholder="Ej: Trabajo en Equipo" required
+            class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition">
+        </div>
+      </div>
+      <!-- Emoji picker -->
+      <div id="np-emoji-picker" class="hidden bg-gray-50 border border-gray-200 rounded-xl p-3">
+        <div class="grid grid-cols-8 gap-1" id="np-emoji-grid"></div>
+      </div>
+
+      <!-- Tag -->
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1.5">Tag / #</label>
+        <div class="relative">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">#</span>
+          <input id="np-tag" type="text" placeholder="trabajo-en-equipo"
+            class="w-full pl-7 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition">
+        </div>
+      </div>
+
+      <!-- Descripción -->
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1.5">Descripción</label>
+        <textarea id="np-description" rows="3" placeholder="Describí el propósito de este programa..."
+          class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition resize-none"></textarea>
+      </div>
+
+      <!-- Budget -->
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1.5">Budget de puntos</label>
+
+        <!-- Estado actual (solo visible al editar) -->
+        <div id="np-budget-status" class="hidden mb-3 rounded-xl bg-celeste-50 border border-celeste-200 px-4 py-3 flex items-center justify-between">
+          <div>
+            <p class="text-xs text-celeste-600 font-medium">Disponible actualmente</p>
+            <p class="text-lg font-bold text-celeste-700"><span id="np-budget-remaining">0</span> pts</p>
+          </div>
+          <div class="text-right">
+            <p class="text-xs text-gray-400">Total original</p>
+            <p class="text-sm font-semibold text-gray-600"><span id="np-budget-total">0</span> pts</p>
+          </div>
+        </div>
+
+        <!-- Input para crear (nuevo) -->
+        <div id="np-budget-create" class="relative">
+          <i data-lucide="coins" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+          <input id="np-budget" type="number" min="0" placeholder="0"
+            class="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition">
+        </div>
+
+        <!-- Input para recargar (edición) -->
+        <div id="np-budget-recharge" class="hidden">
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5">Agregar puntos al programa</label>
+          <div class="flex gap-2">
+            <div class="relative flex-1">
+              <i data-lucide="plus-circle" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+              <input id="np-budget-add" type="number" min="0" placeholder="0"
+                oninput="updateBudgetPreview()"
+                class="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition">
+            </div>
+            <div class="flex items-center px-3 py-2.5 rounded-xl bg-gray-100 text-sm font-semibold text-gray-500 whitespace-nowrap">
+              Total: <span id="np-budget-preview" class="ml-1 text-celeste-700">0</span> pts
+            </div>
+          </div>
+        </div>
+
+        <p class="text-xs text-gray-400 mt-1">Cantidad de puntos disponibles para distribuir en este programa.</p>
+      </div>
+
+      <!-- Imagen banner -->
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1.5">Imagen banner</label>
+        <label id="np-image-label" class="flex flex-col items-center justify-center gap-2 w-full h-28 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 cursor-pointer hover:border-celeste-400 hover:bg-celeste-50/30 transition overflow-hidden relative">
+          <input type="file" id="np-image-input" accept="image/*" class="hidden" onchange="previewProgramImage(this)">
+          <div id="np-image-placeholder" class="flex flex-col items-center gap-1 text-gray-400">
+            <i data-lucide="image-plus" class="w-6 h-6"></i>
+            <span class="text-xs">Subir imagen (aparecerá en el feed)</span>
+          </div>
+          <img id="np-image-preview" class="hidden absolute inset-0 w-full h-full object-cover">
+        </label>
+        <button type="button" id="np-image-clear" class="hidden text-xs text-gray-400 hover:text-red-500 mt-1 transition" onclick="clearProgramImage()">Quitar imagen</button>
+      </div>
+
+      <!-- Empleados -->
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1.5">Empleados que pueden reconocer</label>
+        <div class="relative mb-2">
+          <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+          <input id="np-emp-search" type="text" placeholder="Buscar empleado..."
+            oninput="filterProgramEmployees()"
+            class="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition">
+        </div>
+        <div id="np-emp-list" class="border border-gray-200 rounded-xl max-h-40 overflow-y-auto bg-white divide-y divide-gray-50"></div>
+        <p id="np-emp-count" class="text-xs text-gray-400 mt-1">0 empleados seleccionados</p>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex gap-3 pt-2">
+        <button type="button" onclick="closeNewProgramModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
+        <button type="submit" id="np-submit-btn" class="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-celeste-400 to-rosita-400 text-white text-sm font-semibold shadow hover:opacity-90 transition">Crear programa</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     DELETE PROGRAM CONFIRM MODAL
+══════════════════════════════════════ -->
+<div id="delete-program-modal" class="hidden fixed inset-0 z-[500] flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeDeleteProgramModal()"></div>
+  <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+        <i data-lucide="trash-2" class="w-5 h-5 text-red-500"></i>
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-gray-800">Eliminar programa</h3>
+        <p class="text-xs text-gray-500 mt-0.5">Esta acción no se puede deshacer</p>
+      </div>
+    </div>
+    <p class="text-sm text-gray-600">¿Estás seguro que querés eliminar <span id="delete-program-name" class="font-semibold text-gray-800"></span>? Los reconocimientos pasados no se verán afectados.</p>
+    <div class="flex gap-3 pt-1">
+      <button onclick="closeDeleteProgramModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
+      <button onclick="confirmDeleteProgram()" class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     CROP IMAGE MODAL
+══════════════════════════════════════ -->
+<div id="crop-modal" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+  <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+      <h3 class="text-base font-bold text-gray-800">Recortar imagen</h3>
+      <button onclick="closeCropModal()" class="p-2 rounded-full hover:bg-gray-100 transition">
+        <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+      </button>
+    </div>
+    <div class="bg-gray-900 flex items-center justify-center" style="max-height:400px;min-height:200px;">
+      <img id="crop-source" src="" alt="crop" style="max-width:100%;display:block;">
+    </div>
+    <div class="px-5 py-3 bg-gray-50 border-t border-gray-100">
+      <p class="text-xs text-gray-400 text-center">Arrastrá y ajustá el área de recorte. La proporción es fija para el banner.</p>
+    </div>
+    <div class="flex gap-3 px-5 py-4">
+      <button onclick="closeCropModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
+      <button onclick="applyCrop()" class="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-celeste-400 to-rosita-400 text-white text-sm font-semibold shadow hover:opacity-90 transition">Aplicar recorte</button>
+    </div>
+  </div>
+</div>
+
+</div><!-- /app -->
+
+<!-- ══════════════════════════════════════
+     RECOGNITION MODAL
+══════════════════════════════════════ -->
+<div id="recognize-modal" class="hidden fixed inset-0 z-[100]">
+  <div class="modal-backdrop absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeModal()"></div>
+  <div class="modal-content absolute inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col max-h-[95%] md:max-h-[90%] overflow-hidden">
+    <div class="flex items-center justify-between p-5 border-b border-gray-100">
+      <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-rosa-500 flex items-center justify-center"><i data-lucide="heart" class="w-4 h-4 text-white"></i></span>
+        Nuevo reconocimiento
+      </h2>
+      <button onclick="closeModal()" class="p-2 rounded-full hover:bg-gray-100 transition"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+    </div>
+
+    <!-- Steps indicator -->
+    <div class="px-5 pt-4 pb-2">
+      <div class="flex items-center gap-2">
+        <div id="step-ind-1" class="flex items-center gap-1.5">
+          <div class="w-6 h-6 rounded-full bg-violet-500 text-white text-xs font-bold flex items-center justify-center">1</div>
+          <span class="text-xs font-medium text-violet-600 hidden sm:inline">Persona</span>
+        </div>
+        <div class="flex-1 h-0.5 bg-gray-200 rounded"><div id="prog-1" class="h-full bg-violet-400 rounded transition-all duration-300" style="width:0%"></div></div>
+        <div id="step-ind-2" class="flex items-center gap-1.5">
+          <div class="w-6 h-6 rounded-full bg-gray-200 text-gray-500 text-xs font-bold flex items-center justify-center">2</div>
+          <span class="text-xs font-medium text-gray-400 hidden sm:inline">Programa</span>
+        </div>
+        <div class="flex-1 h-0.5 bg-gray-200 rounded"><div id="prog-2" class="h-full bg-violet-400 rounded transition-all duration-300" style="width:0%"></div></div>
+        <div id="step-ind-3" class="flex items-center gap-1.5">
+          <div class="w-6 h-6 rounded-full bg-gray-200 text-gray-500 text-xs font-bold flex items-center justify-center">3</div>
+          <span class="text-xs font-medium text-gray-400 hidden sm:inline">Mensaje</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex-1 overflow-y-auto px-5 py-4">
+      <!-- Step 1 -->
+      <div id="step-1" class="space-y-4">
+        <div class="relative">
+          <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+          <input type="text" id="person-search" placeholder="Buscar empleado..."
+            class="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            oninput="filterPeople(this.value)">
+        </div>
+        <div id="people-list" class="space-y-2"></div>
+      </div>
+
+      <!-- Step 2 — programas dinámicos desde DB -->
+      <div id="step-2" class="hidden space-y-4">
+        <p class="text-sm text-gray-500">Seleccioná el tipo de reconocimiento:</p>
+        <div id="programs-grid" class="grid grid-cols-2 gap-3">
+          <!-- Renderizado dinámicamente por renderProgramsInModal() -->
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div id="step-3" class="hidden space-y-4">
+        <div id="selected-summary" class="flex items-center gap-3 p-3 bg-violet-50 rounded-xl">
+          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-rosa-500 flex items-center justify-center text-white font-bold text-sm" id="sum-avatar">?</div>
+          <div><p class="text-sm font-semibold text-gray-800" id="sum-name">—</p><p class="text-xs text-violet-600" id="sum-program">—</p></div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Tu mensaje</label>
+          <textarea id="recog-message" rows="4" placeholder="Contá por qué reconocés a esta persona..."
+            class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"></textarea>
+        </div>
+        <!-- Program budget banner (shown when selected program has budget) -->
+        <div id="program-budget-info" class="hidden rounded-xl bg-celeste-50 border border-celeste-200 px-4 py-3">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold text-celeste-700">Presupuesto del programa</span>
+            <span class="text-xs font-bold text-celeste-700"><span id="budget-remaining">0</span> pts disponibles</span>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" id="use-program-budget" onchange="toggleBudgetSource()"
+              class="w-4 h-4 rounded border-gray-300 accent-celeste-500">
+            <span class="text-xs text-celeste-800 font-medium">Usar puntos del programa</span>
+          </label>
+        </div>
+        <!-- Points toggle + slider -->
+        <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-gray-700">Agregar puntos</p>
+              <p class="text-xs text-gray-400 mt-0.5">Opcional — podés reconocer sin dar puntos</p>
+            </div>
+            <!-- Switch -->
+            <button type="button" id="points-toggle" onclick="togglePointsSwitch()"
+              role="switch" aria-checked="false"
+              class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 bg-gray-300 focus:outline-none">
+              <span id="points-toggle-dot" class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 translate-x-1"></span>
+            </button>
+          </div>
+          <!-- Slider (hidden by default) -->
+          <div id="points-slider-wrap" class="hidden mt-4">
+            <div class="flex items-center gap-3">
+              <input type="range" id="points-slider" min="0" max="50" value="25" step="5"
+                class="flex-1 accent-violet-500" oninput="updatePointsSlider(this.value)">
+              <span id="points-val" class="text-lg font-bold text-violet-600 w-8 text-center">25</span>
+              <span class="text-xs text-gray-400">pts</span>
+            </div>
+            <p id="points-warning" class="text-xs text-red-500 mt-1 hidden">No tenés suficientes puntos</p>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Imagen (opcional)</label>
+          <div class="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-violet-300 transition cursor-pointer" onclick="document.getElementById('file-input').click()">
+            <i data-lucide="image-plus" class="w-8 h-8 mx-auto text-gray-300 mb-2"></i>
+            <p class="text-sm text-gray-400">Clic para subir una imagen</p>
+            <input type="file" id="file-input" accept="image/*" class="hidden">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="p-5 border-t border-gray-100 flex items-center justify-between">
+      <button id="modal-back" class="hidden px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition flex items-center gap-1" onclick="prevStep()">
+        <i data-lucide="arrow-left" class="w-4 h-4"></i> Atrás
+      </button>
+      <div class="flex-1"></div>
+      <button id="modal-next" class="btn-recognize text-white px-6 py-2.5 rounded-full text-sm font-semibold shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition" onclick="nextStep()" disabled>
+        <span id="next-text">Siguiente</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     SUCCESS TOAST
+══════════════════════════════════════ -->
+<div id="success-toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-gradient-to-r from-violet-600 to-rosa-500 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 text-sm font-semibold" style="animation: scaleIn 0.3s ease">
+  <i data-lucide="check-circle" class="w-5 h-5"></i> <span>¡Reconocimiento enviado! 🎉</span>
+</div>
+
+<!-- ══════════════════════════════════════
+     CHANGE PASSWORD MODAL (FIRST LOGIN)
+══════════════════════════════════════ -->
+<div id="change-password-modal" class="hidden fixed inset-0 z-[200]">
+  <div class="modal-backdrop absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="closeChangePasswordModal(event)"></div>
+  <div class="modal-content absolute inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-md bg-white rounded-2xl shadow-2xl flex flex-col max-h-[95%] md:max-h-[90%] overflow-hidden">
+    <div class="px-6 py-6 border-b border-gray-100">
+      <div class="flex items-center gap-3 mb-2">
+        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-500 to-rosa-500 flex items-center justify-center"><i data-lucide="lock" class="w-5 h-5 text-white"></i></div>
+        <h2 class="text-xl font-bold text-gray-800">Establece tu contraseña</h2>
+      </div>
+      <p class="text-sm text-gray-500 ml-13">Es tu primer ingreso, necesitamos que definas tu contraseña segura</p>
+    </div>
+    <div class="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+      <div>
+        <p class="text-sm font-semibold text-gray-800 mb-3">Hola, <span id="pwd-change-name">—</span>! 👋</p>
+        <p class="text-xs text-gray-600">Por seguridad, debes crear una contraseña única antes de acceder a la plataforma.</p>
+      </div>
+      <div class="p-4 rounded-lg bg-blue-50 border border-blue-200">
+        <p class="text-xs font-semibold text-blue-600 uppercase mb-2">Contraseña temporal</p>
+        <div class="flex items-center justify-between">
+          <code class="font-mono text-sm text-blue-900">password123</code>
+          <button onclick="copyToClipboard('password123')" class="p-2 rounded-lg hover:bg-blue-100 transition text-blue-600"><i data-lucide="copy" class="w-4 h-4"></i></button>
+        </div>
+        <p class="text-[11px] text-blue-600 mt-2">Esta es tu contraseña temporal.</p>
+      </div>
+      <div>
+        <label for="new-password-input" class="block text-sm font-semibold text-gray-700 mb-2">Nueva contraseña</label>
+        <div class="relative">
+          <input type="password" id="new-password-input" placeholder="Al menos 6 caracteres"
+            class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent transition">
+          <button type="button" onclick="togglePasswordVisibilityModal('new-password-input')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><i data-lucide="eye" class="w-5 h-5"></i></button>
+        </div>
+        <p class="text-xs text-gray-500 mt-1.5">Usa mayúsculas, minúsculas y números</p>
+      </div>
+      <div>
+        <label for="confirm-password-input" class="block text-sm font-semibold text-gray-700 mb-2">Confirmar contraseña</label>
+        <div class="relative">
+          <input type="password" id="confirm-password-input" placeholder="Repite tu nueva contraseña"
+            class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent transition">
+          <button type="button" onclick="togglePasswordVisibilityModal('confirm-password-input')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><i data-lucide="eye" class="w-5 h-5"></i></button>
+        </div>
+      </div>
+      <div id="pwd-change-error" class="hidden p-3 rounded-lg bg-red-50 border border-red-200"><p id="pwd-change-error-text" class="text-sm text-red-600"></p></div>
+      <div class="p-3 rounded-lg bg-gray-50 border border-gray-200">
+        <p class="text-xs font-semibold text-gray-700 mb-2">Requisitos de seguridad:</p>
+        <ul class="space-y-1.5 text-xs text-gray-600">
+          <li class="flex items-center gap-2"><span id="req-length" class="text-gray-300">○</span> Mínimo 6 caracteres</li>
+          <li class="flex items-center gap-2"><span id="req-match"  class="text-gray-300">○</span> Las contraseñas coinciden</li>
+        </ul>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex gap-3">
+      <button id="pwd-change-cancel-btn" onclick="logoutFromPasswordChange()" class="flex-1 px-4 py-2.5 rounded-lg border-2 border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition">Salir</button>
+      <button id="pwd-change-save-btn" onclick="saveNewPassword()" class="flex-1 btn-recognize text-white px-4 py-2.5 rounded-lg font-semibold text-sm shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition" disabled>Establecer contraseña</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     ADMIN PAGE
+══════════════════════════════════════ -->
+<div id="admin-page" class="hidden fixed inset-0 z-40 bg-gray-50 overflow-y-auto flex flex-col h-full w-full">
+  <nav class="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm">
+    <div class="flex items-center justify-between px-4 md:px-6 h-16">
+      <div class="flex items-center gap-3">
+        <button onclick="closeAdminPage()" class="p-2 rounded-lg hover:bg-gray-100 transition"><i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i></button>
+        <h1 class="text-xl font-bold text-gray-800">Panel de Administrador</h1>
+      </div>
+    </div>
+  </nav>
+  <main class="flex-1 px-4 md:px-6 py-6 md:py-8 overflow-y-auto">
+    <div class="max-w-4xl mx-auto space-y-6 pb-20">
+
+      <!-- Impersonation -->
+      <div class="bg-gradient-to-r from-blue-50 to-cyan-50 rounded-2xl p-6 border border-blue-200 shadow-sm">
+        <div class="flex items-center gap-2 mb-5"><i data-lucide="user-check" class="w-5 h-5 text-blue-600"></i><h2 class="text-lg font-bold text-gray-800">Simular usuario (Testing)</h2></div>
+        <p class="text-sm text-gray-600 mb-4">Elige un usuario para ver exactamente qué ve en su perfil</p>
+        <div class="space-y-3">
+          <div id="impersonation-list" class="space-y-2"></div>
+          <button id="add-test-user-btn" class="w-full py-2.5 px-4 rounded-lg border-2 border-blue-300 text-blue-600 font-semibold text-sm hover:bg-blue-50 transition flex items-center justify-center gap-2" onclick="showAddTestUserModal()">
+            <i data-lucide="plus" class="w-4 h-4"></i> Agregar usuario de prueba
+          </button>
+        </div>
+      </div>
+
+      <!-- CSV Upload -->
+      <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+        <div class="flex items-center gap-2 mb-5"><i data-lucide="upload" class="w-5 h-5 text-violet-500"></i><h2 class="text-lg font-bold text-gray-800">Cargar base de datos</h2></div>
+        <p class="text-sm text-gray-600 mb-4">Sube un archivo CSV con columnas: nombre, email, departamento, empresa (company_id), puntos_para_dar, puntos_para_canjear</p>
+        <div class="border-2 border-dashed border-violet-300 rounded-xl p-8 text-center hover:border-violet-500 hover:bg-violet-50 transition cursor-pointer bg-violet-50/30" onclick="document.getElementById('csv-file-input').click()">
+          <i data-lucide="file-up" class="w-12 h-12 mx-auto text-violet-400 mb-3"></i>
+          <p class="text-sm font-semibold text-gray-700">Haz clic para seleccionar un archivo CSV</p>
+          <p class="text-xs text-gray-500 mt-1">o arrastra y suelta aquí</p>
+          <input type="file" id="csv-file-input" accept=".csv" class="hidden" onchange="handleFileUpload(this)">
+        </div>
+        <div class="mt-4">
+          <button id="upload-btn" class="btn-recognize text-white px-6 py-2.5 rounded-full text-sm font-semibold shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-2" onclick="uploadEmployees()" disabled>
+            <i data-lucide="upload-cloud" class="w-4 h-4"></i> Cargar empleados
+          </button>
+        </div>
+      </div>
+
+      <!-- Employees table -->
+      <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+        <div class="flex items-center justify-between mb-5">
+          <div class="flex items-center gap-2"><i data-lucide="users" class="w-5 h-5 text-violet-500"></i><h2 class="text-lg font-bold text-gray-800">Empleados en la base de datos</h2></div>
+          <span id="employee-count" class="text-sm font-semibold text-violet-600 bg-violet-50 px-3 py-1 rounded-full">0 empleados</span>
+        </div>
+        <div id="employees-container" class="space-y-3">
+          <p class="text-sm text-gray-500 text-center py-8">No hay empleados cargados. Sube un archivo CSV para comenzar.</p>
+        </div>
+
+        <!-- Role modal -->
+        <div id="role-modal" class="hidden fixed inset-0 z-50">
+          <div class="modal-backdrop absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeRoleModal()"></div>
+          <div class="modal-content absolute inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-md bg-white rounded-2xl shadow-2xl flex flex-col max-h-[95%] md:max-h-[90%] overflow-hidden">
+            <div class="flex items-center justify-between p-5 border-b border-gray-100">
+              <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2"><i data-lucide="shield" class="w-5 h-5 text-violet-500"></i> Cambiar rol de usuario</h2>
+              <button onclick="closeRoleModal()" class="p-2 rounded-full hover:bg-gray-100 transition"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-5 space-y-4">
+              <div class="p-4 rounded-lg bg-blue-50 border border-blue-200">
+                <p id="role-modal-user-name" class="font-semibold text-gray-800">—</p>
+                <p id="role-modal-user-email" class="text-sm text-gray-600 mt-1">—</p>
+              </div>
+              <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-3">Nuevo rol</label>
+                <div class="space-y-2">
+                  <label class="flex items-center gap-3 p-3 rounded-lg border-2 border-gray-200 hover:border-violet-300 cursor-pointer transition has-[:checked]:border-violet-500 has-[:checked]:bg-violet-50">
+                    <input type="radio" name="new-role" value="employee" class="w-4 h-4 accent-violet-500">
+                    <div><p class="font-semibold text-gray-800 text-sm">Empleado</p><p class="text-xs text-gray-500 mt-0.5">Acceso básico a la plataforma</p></div>
+                  </label>
+                  <label class="flex items-center gap-3 p-3 rounded-lg border-2 border-gray-200 hover:border-blue-300 cursor-pointer transition has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+                    <input type="radio" name="new-role" value="admin" class="w-4 h-4 accent-blue-500">
+                    <div><p class="font-semibold text-gray-800 text-sm">Administrador de empresa</p><p class="text-xs text-gray-500 mt-0.5">Gestiona empleados de su empresa</p></div>
+                  </label>
+                  <label class="flex items-center gap-3 p-3 rounded-lg border-2 border-gray-200 hover:border-purple-300 cursor-pointer transition has-[:checked]:border-purple-500 has-[:checked]:bg-purple-50">
+                    <input type="radio" name="new-role" value="superadmin" class="w-4 h-4 accent-purple-500">
+                    <div><p class="font-semibold text-gray-800 text-sm">Superadministrador</p><p class="text-xs text-gray-500 mt-0.5">Acceso total a todas las empresas</p></div>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="p-5 border-t border-gray-100 flex gap-3">
+              <button onclick="closeRoleModal()" class="flex-1 px-4 py-2.5 rounded-lg border-2 border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition">Cancelar</button>
+              <button id="save-role-btn" onclick="saveRoleChange()" class="flex-1 px-4 py-2.5 bg-violet-600 text-white font-semibold text-sm rounded-lg hover:bg-violet-700 transition">Guardar rol</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex gap-3 mt-6">
+          <button onclick="clearAllEmployees()" class="flex-1 px-6 py-3 rounded-xl border-2 border-red-200 text-red-700 font-semibold hover:bg-red-50 hover:border-red-300 transition flex items-center justify-center gap-2">
+            <i data-lucide="trash-2" class="w-4 h-4"></i> Limpiar todo
+          </button>
+          <button onclick="closeAdminPage()" class="flex-1 px-6 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 transition flex items-center justify-center gap-2">
+            <i data-lucide="x" class="w-4 h-4"></i> Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add test user modal -->
+    <div id="add-test-user-modal" class="hidden fixed inset-0 z-50">
+      <div class="modal-backdrop absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeAddTestUserModal()"></div>
+      <div class="modal-content absolute inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-md bg-white rounded-2xl shadow-2xl flex flex-col max-h-[95%] md:max-h-[90%] overflow-hidden">
+        <div class="flex items-center justify-between p-5 border-b border-gray-100">
+          <h2 class="text-lg font-bold text-gray-800">Agregar usuario de prueba</h2>
+          <button onclick="closeAddTestUserModal()" class="p-2 rounded-full hover:bg-gray-100 transition"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-5 space-y-4">
+          <div><label class="block text-sm font-semibold text-gray-700 mb-2">Nombre</label><input type="text" id="test-user-name" placeholder="Ej: Juan García" class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"></div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-2">Email</label>
+            <input type="email" id="test-user-email" placeholder="Ej: juan@techcorp.com" class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+            <p class="text-xs text-gray-500 mt-1">Dominios: @techcorp.com, @designstudio.com, @marketingpro.com, @superadmin.com</p>
+          </div>
+          <div><label class="block text-sm font-semibold text-gray-700 mb-2">Departamento</label><input type="text" id="test-user-dept" placeholder="Ej: Tecnología" class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"></div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-2">Rol</label>
+            <select id="test-user-role" class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+              <option value="employee">Empleado</option>
+              <option value="admin">Administrador</option>
+              <option value="superadmin">Superadmin</option>
+            </select>
+          </div>
+        </div>
+        <div class="p-5 border-t border-gray-100 flex gap-3">
+          <button onclick="closeAddTestUserModal()" class="flex-1 px-4 py-2.5 rounded-lg border-2 border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition">Cancelar</button>
+          <button onclick="createTestUser()" class="flex-1 px-4 py-2.5 bg-blue-600 text-white font-semibold text-sm rounded-lg hover:bg-blue-700 transition">Crear</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════
+     NOTIFICATIONS PAGE
+══════════════════════════════════════ -->
+<!-- ══════════════════════════════════════
+     STORE PAGE
+══════════════════════════════════════ -->
+<div id="store-page" class="hidden fixed inset-0 z-[100] bg-gray-50 overflow-y-auto flex flex-col h-full w-full">
+  <nav class="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm">
+    <div class="flex items-center justify-between px-4 md:px-6 h-16">
+      <div class="flex items-center gap-3">
+        <button onclick="closeStore()" class="p-2 rounded-full hover:bg-gray-100 transition">
+          <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+        </button>
+        <h2 class="text-base font-bold text-gray-800">Mis beneficios</h2>
+      </div>
+      <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-50 border border-violet-200">
+        <i data-lucide="coins" class="w-4 h-4 text-violet-600"></i>
+        <span id="store-points-display" class="text-sm font-bold text-violet-700">0 pts</span>
+      </div>
+    </div>
+  </nav>
+  <div class="flex-1 p-4 md:p-6 w-full">
+    <div id="store-hero-block" class="mb-6"></div>
+    <div id="store-rewards-container"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     NOTIFICATIONS PAGE
+══════════════════════════════════════ -->
+<div id="notifications-page" class="hidden fixed inset-0 z-[100] bg-gray-50 overflow-y-auto flex flex-col h-full w-full">
+  <nav class="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm">
+    <div class="flex items-center justify-between px-4 md:px-6 h-16">
+      <div class="flex items-center gap-3">
+        <button onclick="closeNotificationsPage()" class="p-2 rounded-lg hover:bg-gray-100 transition"><i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i></button>
+        <h1 class="text-xl font-bold text-gray-800">Notificaciones</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="openNotificationSettings()" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-600 font-semibold text-sm transition">
+          <i data-lucide="settings" class="w-4 h-4"></i> <span class="hidden sm:inline">Configurar</span>
+        </button>
+        <button id="mark-all-read-btn" onclick="markAllAsRead()" class="text-sm text-violet-600 hover:text-violet-700 font-semibold transition">Marcar todas como leídas</button>
+      </div>
+    </div>
+  </nav>
+  <main class="flex-1 px-4 md:px-6 py-6 md:py-8 overflow-y-auto">
+    <div class="max-w-2xl mx-auto space-y-3 pb-20">
+      <div class="flex gap-2 mb-6 border-b border-gray-200">
+        <button id="tab-all"    onclick="switchNotificationTab('all')"    class="px-4 py-3 text-sm font-semibold text-violet-600 border-b-2 border-violet-600 transition">Todas</button>
+        <button id="tab-unread" onclick="switchNotificationTab('unread')" class="px-4 py-3 text-sm font-semibold text-gray-600 border-b-2 border-transparent hover:text-gray-800 transition">Sin leer</button>
+      </div>
+      <div id="notifications-list-page" class="space-y-3"></div>
+    </div>
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════
+     PROFILE PAGE
+══════════════════════════════════════ -->
+<div id="profile-page" class="hidden fixed inset-0 z-[100] bg-gray-50 overflow-y-auto flex flex-col h-full w-full">
+  <nav class="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm">
+    <div class="flex items-center justify-between px-4 md:px-6 h-16">
+      <div class="flex items-center gap-3">
+        <button onclick="closeProfilePage()" class="p-2 rounded-lg hover:bg-gray-100 transition"><i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i></button>
+        <h1 class="text-xl font-bold text-gray-800">Configuración de perfil</h1>
+      </div>
+      <div class="w-9 h-9 rounded-full bg-gradient-to-br from-lila-400 to-rosa-400 flex items-center justify-center text-white text-sm font-bold">M</div>
+    </div>
+  </nav>
+  <main class="flex-1 px-4 md:px-6 py-6 md:py-8 overflow-y-auto">
+    <div class="max-w-2xl mx-auto space-y-6 pb-20">
+
+      <!-- User info -->
+      <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+        <div class="flex items-center gap-2 mb-5"><i data-lucide="lock" class="w-5 h-5 text-red-500"></i><h2 class="text-lg font-bold text-gray-800">Información del usuario</h2></div>
+        <div class="space-y-3">
+          <div class="p-4 rounded-lg bg-gray-50 border border-gray-200"><p class="text-xs font-semibold text-gray-500 uppercase">Nombre</p><p id="profile-display-name" class="text-lg font-bold text-gray-800 mt-1">—</p></div>
+          <div class="p-4 rounded-lg bg-gray-50 border border-gray-200"><p class="text-xs font-semibold text-gray-500 uppercase">Email</p><p id="profile-display-email" class="text-lg font-bold text-gray-800 mt-1">—</p></div>
+          <div class="p-4 rounded-lg bg-gray-50 border border-gray-200"><p class="text-xs font-semibold text-gray-500 uppercase">Empresa</p><p id="profile-display-company" class="text-lg font-bold text-gray-800 mt-1">—</p></div>
+          <div class="p-4 rounded-lg bg-gray-50 border border-gray-200"><p class="text-xs font-semibold text-gray-500 uppercase">Rol</p><p id="profile-display-role" class="text-lg font-bold text-gray-800 mt-1">—</p></div>
+        </div>
+      </div>
+
+      <!-- Recognition preferences -->
+      <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+        <div class="flex items-center gap-2 mb-5"><i data-lucide="eye" class="w-5 h-5 text-violet-500"></i><h2 class="text-lg font-bold text-gray-800">Preferencias de reconocimiento</h2></div>
+        <div class="space-y-5">
+          <div class="pb-5 border-b border-gray-100">
+            <p class="font-semibold text-gray-800 text-sm mb-1">Visibilidad de reconocimientos</p>
+            <p class="text-xs text-gray-500 mb-3">Controlá si otros pueden ver esta información</p>
+            <div class="flex gap-3">
+              <label class="flex items-center gap-2 cursor-pointer group"><input type="radio" name="recognition-visibility" value="public" checked class="w-4 h-4 accent-violet-500"><span class="text-sm text-gray-700 group-hover:text-violet-600">Público</span></label>
+              <label class="flex items-center gap-2 cursor-pointer group"><input type="radio" name="recognition-visibility" value="private" class="w-4 h-4 accent-violet-500"><span class="text-sm text-gray-700 group-hover:text-violet-600">Privado</span></label>
+            </div>
+          </div>
+          <div class="pb-5 border-b border-gray-100">
+            <div class="flex items-center justify-between">
+              <div><p class="font-semibold text-gray-800 text-sm flex items-center gap-1">🎂 Mostrar / Ocultar mi cumpleaños</p><p class="text-xs text-gray-500 mt-1">Tu equipo verá tu cumpleaños en el calendario</p></div>
+              <label class="toggle-switch"><input type="checkbox" checked><span class="slider"></span></label>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between">
+              <div><p class="font-semibold text-gray-800 text-sm flex items-center gap-1">🏢 Mostrar / Ocultar mi aniversario laboral</p><p class="text-xs text-gray-500 mt-1">Tu equipo verá tu aniversario en la empresa</p></div>
+              <label class="toggle-switch"><input type="checkbox" checked><span class="slider"></span></label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Notifications preferences -->
+      <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+        <div class="flex items-center gap-2 mb-5"><i data-lucide="bell" class="w-5 h-5 text-violet-500"></i><h2 class="text-lg font-bold text-gray-800">Notificaciones</h2></div>
+        <div class="space-y-4" id="notification-prefs">
+          <!-- Notification row helper macro (inlined for each row) -->
+          <div class="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition">
+            <p class="font-semibold text-gray-800 text-sm mb-1">Nuevos reconocimientos</p>
+            <p class="text-xs text-gray-500 mb-3">Recibí notificaciones cuando alguien te reconozca</p>
+            <div class="flex gap-6">
+              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">En plataforma</span></label>
+              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">Por email</span></label>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition">
+            <p class="font-semibold text-gray-800 text-sm mb-1">Reacciones a mis reconocimientos</p>
+            <p class="text-xs text-gray-500 mb-3">Alguien reaccionó con un emoji a tu reconocimiento</p>
+            <div class="flex gap-6">
+              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">En plataforma</span></label>
+              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">Por email</span></label>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition">
+            <p class="font-semibold text-gray-800 text-sm mb-1">Comentarios en mis reconocimientos</p>
+            <p class="text-xs text-gray-500 mb-3">Alguien comentó en tu reconocimiento</p>
+            <div class="flex gap-6">
+              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">En plataforma</span></label>
+              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">Por email</span></label>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition">
+            <p class="font-semibold text-gray-800 text-sm mb-1">Vencimiento de puntos</p>
+            <p class="text-xs text-gray-500 mb-3">Recordá cuando tus puntos estén por vencer</p>
+            <div class="flex gap-6">
+              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">En plataforma</span></label>
+              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">Por email</span></label>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition">
+            <p class="font-semibold text-gray-800 text-sm mb-1">Campañas de la empresa</p>
+            <p class="text-xs text-gray-500 mb-3">Enterate de nuevas campañas y promociones</p>
+            <div class="flex gap-6">
+              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">En plataforma</span></label>
+              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">Por email</span></label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="flex gap-3 fixed bottom-0 left-0 right-0 bg-gradient-to-t from-gray-50 to-gray-50 pt-6 pb-6 px-4 md:px-6">
+        <div class="max-w-2xl mx-auto w-full flex gap-3">
+          <button onclick="closeProfilePage()" class="flex-1 px-6 py-3 rounded-xl border-2 border-gray-200 text-gray-700 font-semibold hover:bg-gray-50 hover:border-gray-300 transition flex items-center justify-center gap-2">
+            <i data-lucide="x" class="w-4 h-4"></i> Cancelar
+          </button>
+          <button onclick="saveSettings()" class="flex-1 btn-recognize text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2">
+            <i data-lucide="check" class="w-4 h-4"></i> Guardar cambios
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════
+     ANALYTICS PAGE
+══════════════════════════════════════ -->
+<div id="analytics-page" class="hidden fixed inset-0 z-40 bg-gray-50 overflow-y-auto flex flex-col h-full w-full">
+  <nav class="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm">
+    <div class="flex items-center justify-between px-4 md:px-6 h-16">
+      <div class="flex items-center gap-3">
+        <button onclick="closeAnalyticsPage()" class="p-2 rounded-lg hover:bg-gray-100 transition">
+          <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+        </button>
+        <h1 class="text-xl font-bold text-gray-800">Analytics</h1>
+      </div>
+      <span class="text-xs text-gray-400 bg-gray-100 px-3 py-1 rounded-full">Solo visible para admins</span>
+    </div>
+  </nav>
+  <main class="flex-1 px-4 md:px-6 py-6 md:py-8 overflow-y-auto">
+    <div class="max-w-5xl mx-auto space-y-6 pb-20">
+
+      <!-- Summary cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+          <p class="text-xs font-semibold text-gray-500 uppercase mb-1">Reconocimientos</p>
+          <p id="analytics-total-recognitions" class="text-3xl font-extrabold text-violet-600">…</p>
+          <p class="text-xs text-gray-400 mt-1">Total acumulado</p>
+        </div>
+        <div class="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+          <p class="text-xs font-semibold text-gray-500 uppercase mb-1">Puntos dados</p>
+          <p id="analytics-total-points" class="text-3xl font-extrabold text-rosa-500">…</p>
+          <p class="text-xs text-gray-400 mt-1">Total acumulado</p>
+        </div>
+        <div class="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+          <p class="text-xs font-semibold text-gray-500 uppercase mb-1">Personas activas</p>
+          <p id="analytics-active-senders" class="text-3xl font-extrabold text-lila-500">…</p>
+          <p class="text-xs text-gray-400 mt-1">Enviaron al menos 1</p>
+        </div>
+        <div class="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+          <p class="text-xs font-semibold text-gray-500 uppercase mb-1">Este mes</p>
+          <p id="analytics-this-month" class="text-3xl font-extrabold text-green-500">…</p>
+          <p class="text-xs text-gray-400 mt-1">Reconocimientos</p>
+        </div>
+      </div>
+
+      <!-- Charts row 1 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        <!-- Top reconocidos -->
+        <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+          <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <i data-lucide="trophy" class="w-4 h-4 text-yellow-500"></i> Top reconocidos
+          </h3>
+          <div class="relative">
+            <canvas id="chart-top-recognized" height="260"></canvas>
+            <p id="chart-top-recognized-empty" class="hidden text-sm text-gray-400 text-center py-10">
+              Aún no hay reconocimientos registrados.
+            </p>
+          </div>
+        </div>
+
+        <!-- Por área -->
+        <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+          <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <i data-lucide="pie-chart" class="w-4 h-4 text-violet-500"></i> Reconocimientos por área
+          </h3>
+          <div class="relative flex items-center justify-center">
+            <canvas id="chart-by-department" height="240" style="max-height:240px"></canvas>
+            <p id="chart-by-department-empty" class="hidden text-sm text-gray-400 text-center py-10">
+              Aún no hay datos por área.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Engagement por mes -->
+      <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+        <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <i data-lucide="trending-up" class="w-4 h-4 text-rosa-500"></i> Engagement por mes (últimos 6 meses)
+        </h3>
+        <canvas id="chart-by-month" height="160"></canvas>
+        <p id="chart-by-month-empty" class="hidden text-sm text-gray-400 text-center py-10">
+          Aún no hay datos históricos suficientes.
+        </p>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════
+     ADD PROGRAM MODAL
+══════════════════════════════════════ -->
+<div id="add-program-modal" class="hidden fixed inset-0 z-[150]">
+  <div class="modal-backdrop absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeAddProgramModal()"></div>
+  <div class="modal-content absolute inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-sm bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between p-5 border-b border-gray-100">
+      <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+        <i data-lucide="target" class="w-5 h-5 text-violet-500"></i> Nuevo programa
+      </h2>
+      <button onclick="closeAddProgramModal()" class="p-2 rounded-full hover:bg-gray-100 transition">
+        <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+      </button>
+    </div>
+    <div class="p-5 space-y-4">
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-2">Emoji</label>
+        <input type="text" id="program-emoji-input" value="⭐" maxlength="4"
+          class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-2xl text-center focus:outline-none focus:ring-2 focus:ring-violet-300">
+        <p class="text-xs text-gray-400 mt-1">Pegá o escribí un emoji</p>
+      </div>
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-2">Nombre del programa</label>
+        <input type="text" id="program-name-input" placeholder="Ej: Servicio al cliente"
+          class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300">
+      </div>
+    </div>
+    <div class="p-5 border-t border-gray-100 flex gap-3">
+      <button onclick="closeAddProgramModal()" class="flex-1 px-4 py-2.5 rounded-lg border-2 border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition">Cancelar</button>
+      <button id="save-program-btn" onclick="saveNewProgram()" class="flex-1 btn-recognize text-white px-4 py-2.5 rounded-lg font-semibold text-sm shadow-lg hover:shadow-xl transition disabled:opacity-40">Crear programa</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
