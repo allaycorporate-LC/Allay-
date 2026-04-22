@@ -1200,23 +1200,39 @@ function returnToSuperadmin() {
 // ─────────────────────────────────────────
 function openModal() {
   currentStep = 1; selectedPerson = null; selectedProgram = null;
+
+  // Reset step-3 summary
+  const sumName   = document.getElementById('sum-name');
+  const sumProg   = document.getElementById('sum-program');
+  const sumAvatar = document.getElementById('sum-avatar');
+  if (sumName)   sumName.textContent   = '—';
+  if (sumProg)   sumProg.textContent   = '—';
+  if (sumAvatar) sumAvatar.textContent = '?';
+
+  // Ensure next button has the span inside (may have been destroyed by finally block)
+  const modalNext = document.getElementById('modal-next');
+  if (modalNext && !document.getElementById('next-text')) {
+    modalNext.innerHTML = '<span id="next-text">Siguiente</span>';
+  }
+
   document.getElementById('recognize-modal').classList.remove('hidden');
   showStep(1);
   document.getElementById('person-search').value = '';
   renderPeopleList();
   filterPeople('');
   renderProgramsInModal();
-  document.getElementById('recog-message').value = '';
+
+  const msgEl = document.getElementById('recog-message');
+  if (msgEl) { msgEl.value = ''; msgEl.blur(); }
+
   document.getElementById('points-slider').value = 25;
-  document.getElementById('points-slider').max   = 50;
+  document.getElementById('points-slider').max   = currentUser?.points_to_give ?? 50;
   document.getElementById('points-val').textContent = '25';
   document.getElementById('points-warning').classList.add('hidden');
   document.getElementById('program-budget-info')?.classList.add('hidden');
   const cb = document.getElementById('use-program-budget');
   if (cb) cb.checked = false;
-  // Reset points switch to OFF
   _setPointsSwitch(false);
-  // Reset image
   clearRecogImage();
   updateModalBtn();
 }
@@ -1473,7 +1489,7 @@ async function sendRecognition() {
     showErrorToast('Error al enviar reconocimiento');
   } finally {
     sendBtn.disabled = false;
-    sendBtn.textContent = originalText;
+    sendBtn.innerHTML = '<span id="next-text">Enviar ✨</span>';
   }
 }
 
