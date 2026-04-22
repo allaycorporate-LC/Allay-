@@ -1216,6 +1216,8 @@ function openModal() {
   if (cb) cb.checked = false;
   // Reset points switch to OFF
   _setPointsSwitch(false);
+  // Reset image
+  clearRecogImage();
   updateModalBtn();
 }
 
@@ -1422,9 +1424,18 @@ async function sendRecognition() {
       await window.dataSdk.update(topped);
     }
 
+    // Upload recognition image if selected, append URL to message
+    let finalMessage = message;
+    if (_recogImageBase64) {
+      sendBtn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Subiendo imagen...';
+      lucide.createIcons();
+      const { isOk: imgOk, url } = await window.storageSdk.uploadRecognitionImage(_recogImageBase64);
+      if (imgOk && url) finalMessage = message + '\n' + url;
+    }
+
     const recCompanyId = currentUser.company_id || recipient.company_id;
     const { isOk, error } = await window.recognitionSdk.send(
-      recipient.__backendId, points, selectedProgram, message, recCompanyId
+      recipient.__backendId, points, selectedProgram, finalMessage, recCompanyId
     );
 
     if (!isOk) {
@@ -1860,6 +1871,11 @@ function buildFeedCard(rec) {
     ? `<span class="points-badge bg-gradient-to-r ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${rec.points} pts</span>`
     : '';
 
+  const { text: msgText, imgs: msgImgs } = parseCommentMessage(rec.message);
+  const recogImgHtml = msgImgs.length > 0
+    ? `<img src="${msgImgs[0]}" class="w-full rounded-xl object-cover max-h-60 mb-3 border border-gray-100" loading="lazy">`
+    : '';
+
   card.innerHTML = `
     ${bannerHtml}
     <div class="p-5">
@@ -1881,7 +1897,7 @@ function buildFeedCard(rec) {
           </div>
         </div>
       </div>
-      <p class="text-sm text-gray-700 leading-relaxed">${rec.message || ''}</p>
+      ${recogImgHtml}<p class="text-sm text-gray-700 leading-relaxed">${msgText || ''}</p>
     </div>
     <div class="bg-gradient-to-r from-violet-50 to-rosa-50 px-5 py-3 flex items-center justify-between">
       <div class="flex gap-3">
@@ -2496,28 +2512,44 @@ function selectNpEmoji(emoji) {
   document.getElementById('np-emoji-picker').classList.add('hidden');
 }
 
-let _cropper = null;
+let _cropper     = null;
+let _cropContext = 'program'; // 'program' | 'recognition'
+let _recogImageBase64 = null;
 
 function previewProgramImage(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => openCropModal(e.target.result);
+  reader.onload = e => openCropModal(e.target.result, 'program');
   reader.readAsDataURL(file);
 }
 
-function openCropModal(src) {
+function handleRecogImageSelect(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => openCropModal(e.target.result, 'recognition');
+  reader.readAsDataURL(file);
+}
+
+function openCropModal(src, context = 'program') {
+  _cropContext = context;
   const modal = document.getElementById('crop-modal');
   const img   = document.getElementById('crop-source');
+  const hint  = document.getElementById('crop-modal-hint');
   modal.classList.remove('hidden');
   lucide.createIcons();
+
+  if (hint) hint.textContent = context === 'recognition'
+    ? 'Arrastrá y ajustá el área de recorte para la imagen del reconocimiento.'
+    : 'Arrastrá y ajustá el área de recorte. La proporción es fija para el banner.';
 
   img.src = src;
   if (_cropper) { _cropper.destroy(); _cropper = null; }
 
   img.onload = () => {
     _cropper = new Cropper(img, {
-      aspectRatio: 3 / 1,
+      aspectRatio: context === 'recognition' ? 16 / 9 : 3 / 1,
       viewMode:    1,
       dragMode:    'move',
       autoCropArea: 1,
@@ -2535,23 +2567,46 @@ function openCropModal(src) {
 function closeCropModal() {
   document.getElementById('crop-modal').classList.add('hidden');
   if (_cropper) { _cropper.destroy(); _cropper = null; }
-  document.getElementById('np-image-input').value = '';
+  if (_cropContext === 'program') {
+    document.getElementById('np-image-input').value = '';
+  } else {
+    document.getElementById('file-input').value = '';
+  }
 }
 
 function applyCrop() {
   if (!_cropper) return;
-  const canvas = _cropper.getCroppedCanvas({ width: 900, height: 300 });
-  _npImageBase64 = canvas.toDataURL('image/jpeg', 0.88);
+  const isRecog = _cropContext === 'recognition';
+  const canvas  = _cropper.getCroppedCanvas(
+    isRecog ? { width: 1200, height: 675 } : { width: 900, height: 300 }
+  );
+  const base64 = canvas.toDataURL('image/jpeg', 0.88);
 
-  const preview = document.getElementById('np-image-preview');
-  preview.src = _npImageBase64;
-  preview.classList.remove('hidden');
-  document.getElementById('np-image-placeholder').classList.add('hidden');
-  document.getElementById('np-image-clear').classList.remove('hidden');
+  if (isRecog) {
+    _recogImageBase64 = base64;
+    const preview = document.getElementById('recog-img-preview');
+    preview.src = base64;
+    document.getElementById('recog-img-preview-wrap').classList.remove('hidden');
+    document.getElementById('recog-img-placeholder').classList.add('hidden');
+  } else {
+    _npImageBase64 = base64;
+    const preview = document.getElementById('np-image-preview');
+    preview.src = base64;
+    preview.classList.remove('hidden');
+    document.getElementById('np-image-placeholder').classList.add('hidden');
+    document.getElementById('np-image-clear').classList.remove('hidden');
+  }
 
   document.getElementById('crop-modal').classList.add('hidden');
   _cropper.destroy();
   _cropper = null;
+}
+
+function clearRecogImage() {
+  _recogImageBase64 = null;
+  document.getElementById('file-input').value = '';
+  document.getElementById('recog-img-preview-wrap').classList.add('hidden');
+  document.getElementById('recog-img-placeholder').classList.remove('hidden');
 }
 
 function clearProgramImage() {
