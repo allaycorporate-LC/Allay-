@@ -2389,7 +2389,17 @@ function renderProgramsInModal() {
   const grid = document.getElementById('programs-grid');
   if (!grid) return;
 
-  const active = companyPrograms.filter(p => p.active !== false);
+  const userId  = currentUser?.__backendId;
+  const isAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
+
+  const active = companyPrograms.filter(p => {
+    if (p.active === false) return false;
+    // Custom programs with assigned employees: only show to those employees (admins always see all)
+    if (p.custom && p.employees?.length > 0 && !isAdmin) {
+      return p.employees.includes(userId);
+    }
+    return true;
+  });
 
   if (active.length === 0) {
     active.push(...DEFAULT_PROGRAMS);
@@ -2654,9 +2664,12 @@ function filterProgramEmployees() {
 function _renderNpEmployeeList(query) {
   const list = document.getElementById('np-emp-list');
   const q = query.toLowerCase().trim();
-  const source = allUsers.filter(u => u.company_id === currentUser?.company_id);
+  // Superadmin sees all users; others see only their company
+  const source = currentUser?.role === 'superadmin'
+    ? allUsers.filter(u => u.role !== 'superadmin')
+    : allUsers.filter(u => u.company_id === currentUser?.company_id && u.email !== currentUser?.email);
   const filtered = q ? source.filter(u =>
-    (u.name || u.email || '').toLowerCase().includes(q) ||
+    (u.name || '').toLowerCase().includes(q) ||
     (u.email || '').toLowerCase().includes(q)
   ) : source;
 
