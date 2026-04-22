@@ -1855,11 +1855,8 @@ function buildFeedCard(rec) {
        </div>`
     : '';
 
-  const _isAdminView    = !isImpersonating && (currentUser?.role === 'superadmin' || currentUser?.role === 'admin');
-  const _myId           = currentUser?.__backendId;
-  const _isInvolved     = _myId != null && (_myId === rec.from_user?.id || _myId === rec.to_user?.id);
-  const pointsBadgeHtml = (_isAdminView || _isInvolved) && rec.points > 0
-    ? `<span class="bg-gradient-to-r ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${rec.points} pts</span>`
+  const pointsBadgeHtml = rec.points > 0
+    ? `<span class="points-badge bg-gradient-to-r ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${rec.points} pts</span>`
     : '';
 
   card.innerHTML = `

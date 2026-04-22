@@ -8,6 +8,10 @@ body.is-superadmin .feed-admin-menu { display: block !important; }
 #admin-nav-link, #analytics-nav-link { display: none !important; }
 body.is-admin #admin-nav-link, body.is-admin #analytics-nav-link { display: flex !important; }
 
+/* Badges de puntos en el feed solo visibles para admin y superadmin */
+.points-badge { display: none !important; }
+body.is-admin .points-badge { display: inline-flex !important; }
+
 html, body { height: 100%; margin: 0; box-sizing: border-box; overflow-x: hidden; }
 
 .feed-card { animation: slideUp 0.4s ease both; }
