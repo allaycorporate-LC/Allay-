@@ -45,7 +45,7 @@ html, body { height: 100%; margin: 0; box-sizing: border-box; overflow-x: hidden
 .modal-content  { animation: scaleIn 0.25s ease; }
 
 .btn-recognize {
-  background: linear-gradient(135deg, #a8cdff 0%, #8ab8ff 50%, #ffa3d3 100%);
+  background: linear-gradient(135deg, #79bbf7 0%, #57a8f4 50%, #ffa3d3 100%);
   background-size: 200% 200%;
   animation: gradientShift 3s ease infinite;
 }
@@ -55,7 +55,7 @@ html, body { height: 100%; margin: 0; box-sizing: border-box; overflow-x: hidden
 }
 
 .points-card {
-  background: linear-gradient(135deg, #a8cdff 0%, #8ab8ff 60%, #ffa3d3 100%);
+  background: linear-gradient(135deg, #79bbf7 0%, #57a8f4 60%, #ffa3d3 100%);
 }
 
 .reaction-btn { transition: transform 0.15s ease; }

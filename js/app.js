@@ -501,6 +501,7 @@ function renderEmployeesList() {
         <div class="flex items-center gap-2">
           <p class="text-sm font-semibold text-gray-800">${emp.name}</p>
           <span class="text-xs font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded border border-gray-200">${emp.company_id}</span>
+          ${emp.role === 'superadmin' ? '<span class="text-xs font-semibold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">Superadmin</span>' : emp.role === 'admin' ? '<span class="text-xs font-semibold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">Admin</span>' : '<span class="text-xs font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Empleado</span>'}
         </div>
         <p class="text-xs text-gray-500 mt-0.5">${emp.email} · ${emp.department}</p>
       </div>
@@ -1094,6 +1095,48 @@ document.addEventListener('click', (e) => {
 // ─────────────────────────────────────────
 // PROFILE
 // ─────────────────────────────────────────
+async function renderRecognitionBattery() {
+  if (!currentUser?.__backendId) return;
+
+  const weekStart = new Date();
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + (weekStart.getDay() === 0 ? -6 : 1)); // lunes
+  weekStart.setHours(0, 0, 0, 0);
+
+  // Use edge function to bypass RLS — works both for own user and during impersonation
+  const rows = await window.analyticsSdk._fetch(
+    currentUser.company_id,
+    weekStart.toISOString(),
+    null
+  );
+  const sent = rows.filter(r => r.from_user_id === currentUser.__backendId);
+
+  const count = sent.length;
+  const MAX   = 5;
+  const filled = Math.min(count, MAX);
+
+  const MSGS = [
+    'No pierdas el ritmo, reconocé hoy 💪',   // 0
+    '¡Arrancaste! Seguí así ✨',               // 1
+    '¡Bien! Construís cultura 🌱',             // 2
+    '¡Vas muy bien! 🌟',                       // 3
+    '¡Casi llena! Un reconocimiento más 🔋',   // 4
+    '¡Batería llena! 🔋🚀',                    // 5
+  ];
+
+  const msgIdx = Math.min(filled, MSGS.length - 1);
+
+  for (let i = 1; i <= MAX; i++) {
+    const seg = document.getElementById(`bseg-${i}`);
+    if (!seg) continue;
+    seg.className = `h-4 w-5 rounded transition-all duration-500 ${i <= filled ? 'bg-emerald-500' : 'bg-gray-100'}`;
+  }
+
+  const label = document.getElementById('battery-label');
+  const msg   = document.getElementById('battery-msg');
+  if (label) label.textContent = `${count} reconocimiento${count !== 1 ? 's' : ''} esta semana`;
+  if (msg)   msg.textContent   = MSGS[msgIdx];
+}
+
 function updateProfileDisplay() {
   if (!currentUser) return;
   const initials  = currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
@@ -1104,6 +1147,7 @@ function updateProfileDisplay() {
 
   const welcomeText = document.getElementById('welcome-text');
   if (welcomeText) welcomeText.textContent = `¡Hola, ${firstName}! 👋`;
+  renderRecognitionBattery();
 
   const pName  = document.getElementById('profile-name');
   const pEmail = document.getElementById('profile-email');
@@ -1233,6 +1277,7 @@ function impersonateEmployee(empBackendId) {
   loadHomeSidebar();
   loadNotifications();
   _setupFeedRealtime();
+  renderRecognitionBattery();
   lucide.createIcons();
 }
 
@@ -1271,6 +1316,7 @@ function returnToSuperadmin() {
   loadHomeSidebar();
   loadNotifications();
   _setupFeedRealtime();
+  renderRecognitionBattery();
   lucide.createIcons();
 }
 
@@ -1312,6 +1358,8 @@ function openModal() {
   document.getElementById('points-slider').max   = currentUser?.points_to_give ?? 50;
   document.getElementById('points-val').textContent = '25';
   document.getElementById('points-warning').classList.add('hidden');
+  const modalPtsAvail = document.getElementById('modal-pts-available');
+  if (modalPtsAvail) modalPtsAvail.textContent = currentUser?.points_to_give ?? 0;
   document.getElementById('program-budget-info')?.classList.add('hidden');
   const cb = document.getElementById('use-program-budget');
   if (cb) cb.checked = false;
@@ -1599,6 +1647,7 @@ async function sendRecognition() {
     loadHomeSidebar();
     loadNotifications();
     closeModal();
+    renderRecognitionBattery();
     const plural = sentCount > 1 ? `a ${sentCount} personas` : `a ${_selectedRecipients[0]?.name}`;
     const successMsg = (usingBudget && selectedProg?.custom)
       ? `¡Reconocimiento enviado ${plural}! -${points * sentCount} pts del programa`
