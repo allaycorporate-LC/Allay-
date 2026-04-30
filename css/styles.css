@@ -45,17 +45,18 @@ html, body { height: 100%; margin: 0; box-sizing: border-box; overflow-x: hidden
 .modal-content  { animation: scaleIn 0.25s ease; }
 
 .btn-recognize {
-  background: linear-gradient(135deg, #79bbf7 0%, #57a8f4 50%, #ffa3d3 100%);
-  background-size: 200% 200%;
-  animation: gradientShift 3s ease infinite;
+  background-color: #3d2b56;
+}
+.btn-recognize:hover {
+  background-color: #2e2040;
 }
 
 .sidebar-gradient {
-  background: linear-gradient(180deg, #f0f8ff 0%, #fff4f9 100%);
+  background: linear-gradient(180deg, #f5f0fa 0%, #fef2f8 100%);
 }
 
 .points-card {
-  background: linear-gradient(135deg, #79bbf7 0%, #57a8f4 60%, #ffa3d3 100%);
+  background-color: #3d2b56;
 }
 
 .reaction-btn { transition: transform 0.15s ease; }
@@ -86,7 +87,7 @@ html, body { height: 100%; margin: 0; box-sizing: border-box; overflow-x: hidden
 
 ::-webkit-scrollbar       { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d8b4fe; border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: #c9a7d4; border-radius: 3px; }
 
 .notification-dot::after {
   content: '';

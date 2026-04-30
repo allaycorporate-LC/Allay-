@@ -30,10 +30,12 @@ function _applySidebarState() {
     // 2. Then shrink (transition plays cleanly)
     sidebar.style.width    = '3.5rem';
     sidebar.style.minWidth = '3.5rem';
+    setTimeout(_repositionVisibleOverlays, 0);
   } else {
     // 1. First expand width (transition plays)
     sidebar.style.width    = '16rem';
     sidebar.style.minWidth = '16rem';
+    setTimeout(_repositionVisibleOverlays, 0);
     if (icon) icon.setAttribute('data-lucide', 'chevrons-left');
     lucide.createIcons();
     // 2. Show text only after transition completes (250ms)
@@ -53,7 +55,8 @@ function _applySidebarState() {
 
 function _closeAllOverlays() {
   const ids = ['profile-page','admin-page','analytics-page','store-page',
-                'notifications-page','programs-page','approvals-page','points-page'];
+                'notifications-page','programs-page','approvals-page','points-page',
+                'user-profile-page'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.classList.add('hidden'); el.style.display = 'none'; }
@@ -69,18 +72,31 @@ function _positionOverlayPage(pageId) {
   const page    = document.getElementById(pageId);
   const sidebar = document.getElementById('left-sidebar');
   const header  = document.getElementById('topnav');
-  if (!page || !sidebar) return;
-  const w         = sidebar.style.width || '16rem';
-  const headerH   = header ? header.offsetHeight : 0;
-  const bannerEl  = document.getElementById('impersonation-banner');
-  const bannerH   = (bannerEl && !bannerEl.classList.contains('hidden')) ? bannerEl.offsetHeight : 0;
-  page.style.left     = w;
+  if (!page) return;
+  const sidebarW = sidebar ? (sidebar.style.width || '16rem') : '0px';
+  const headerH  = header ? header.offsetHeight : 0;
+  const bannerEl = document.getElementById('impersonation-banner');
+  const bannerH  = (bannerEl && !bannerEl.classList.contains('hidden')) ? bannerEl.offsetHeight : 0;
   page.style.position = 'fixed';
+  page.style.left     = sidebarW;
   page.style.top      = (headerH + bannerH) + 'px';
   page.style.right    = '0';
   page.style.bottom   = '0';
-  page.style.zIndex   = '40';
+  page.style.width    = 'auto';
+  page.style.height   = 'auto';
+  page.style.zIndex   = '48';
   page.style.display  = '';
+}
+
+function _repositionVisibleOverlays() {
+  const ids = ['profile-page','admin-page','analytics-page','store-page',
+                'notifications-page','programs-page','approvals-page','points-page'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('hidden') && el.style.display !== 'none') {
+      _positionOverlayPage(id);
+    }
+  });
 }
 
 function _initSidebarTooltip() {
@@ -233,6 +249,7 @@ async function handleLogin(e) {
       _initSidebarTooltip();
       lucide.createIcons();
     } else {
+      _closeAllOverlays();
       document.getElementById('login-page').classList.add('hidden');
       document.getElementById('app').classList.remove('hidden');
       document.getElementById('change-password-modal').classList.add('hidden');
@@ -269,6 +286,7 @@ function logout() {
   isImpersonating = false;
   document.body.classList.remove('is-superadmin');
   originalSuperadminUser = null;
+  _closeAllOverlays();
   document.getElementById('app').classList.add('hidden');
   document.getElementById('change-password-modal').classList.add('hidden');
   document.getElementById('login-page').classList.remove('hidden');
@@ -409,12 +427,7 @@ function getUserRole(email) {
 }
 
 function getAvatarColor(name) {
-  const colors = [
-    'from-violet-500 to-lila-400', 'from-rosa-400 to-rosa-500',
-    'from-lila-400 to-violet-500', 'from-rosa-300 to-lila-400',
-    'from-violet-400 to-rosa-400', 'from-lila-300 to-rosa-400',
-    'from-violet-600 to-lila-500', 'from-rosa-500 to-lila-500'
-  ];
+  const colors = ['bg-[#3d2b56]', 'bg-[#f19ac4]', 'bg-[#c9a7d4]'];
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
@@ -566,7 +579,7 @@ function renderPeopleList() {
     return `
       <div class="person-item flex items-center gap-3 p-3 rounded-xl hover:bg-violet-50 cursor-pointer transition border ${isSelected ? 'bg-violet-50 border-violet-300' : 'border-transparent hover:border-violet-200'}"
            data-name="${emp.name}" data-id="${emp.__backendId}" data-email="${emp.email}" onclick="toggleRecipient(this)">
-        <div class="w-10 h-10 rounded-full bg-gradient-to-br ${avatarColor} flex items-center justify-center text-white font-bold shrink-0">
+        <div class="w-10 h-10 rounded-full ${avatarColor} flex items-center justify-center text-white font-bold shrink-0">
           ${initials}
         </div>
         <div class="flex-1 min-w-0">
@@ -923,7 +936,7 @@ function showSuccessToast(msg) {
 
 function showErrorToast(msg) {
   const toast = document.createElement('div');
-  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-gradient-to-r from-red-600 to-red-500 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 text-sm font-semibold';
+  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-red-600 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 text-sm font-semibold';
   toast.style.animation = 'scaleIn 0.3s ease';
   toast.innerHTML = `<i data-lucide="alert-circle" class="w-5 h-5"></i> <span>${msg}</span>`;
   document.body.appendChild(toast);
@@ -1001,7 +1014,7 @@ function renderNotificationsPage() {
       return `
         <div class="p-4 rounded-xl border ${notif.read ? 'border-gray-200 bg-white' : 'border-blue-300 bg-blue-50'} hover:shadow-md transition cursor-pointer group">
           <div class="flex items-start gap-3">
-            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-violet-400 flex items-center justify-center text-white font-bold shrink-0 group-hover:scale-105 transition">${notif.name.charAt(0)}</div>
+            <div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0 group-hover:scale-105 transition">${notif.name.charAt(0)}</div>
             <div class="flex-1 min-w-0">
               <p class="text-sm text-gray-800"><span class="font-semibold">${notif.name}</span> ${notif.action}</p>
               <p class="text-xs text-gray-600 mt-1.5 italic">"${notif.message}"</p>
@@ -1014,7 +1027,7 @@ function renderNotificationsPage() {
       return `
         <div class="p-4 rounded-xl border ${notif.read ? 'border-gray-200 bg-white' : 'border-yellow-300 bg-yellow-50'} hover:shadow-md transition cursor-pointer group">
           <div class="flex items-start gap-3">
-            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-400 to-orange-400 flex items-center justify-center text-white font-bold shrink-0 group-hover:scale-105 transition">🎯</div>
+            <div class="w-10 h-10 rounded-full bg-[#f19ac4] flex items-center justify-center text-white font-bold shrink-0 group-hover:scale-105 transition">🎯</div>
             <div class="flex-1 min-w-0">
               <p class="text-sm text-gray-800"><span class="font-semibold">${notif.name}</span> ${notif.action}</p>
               <p class="text-xs text-gray-400 mt-1"><i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${notif.time}</p>
@@ -1026,8 +1039,8 @@ function renderNotificationsPage() {
     }
     // recognition / reaction_multiple
     const avatarGrad = notif.type === 'reaction_multiple'
-      ? 'from-purple-400 to-rosa-400'
-      : 'from-violet-400 to-rosa-400';
+      ? 'bg-[#c9a7d4]'
+      : 'bg-[#3d2b56]';
     const avatarContent = notif.type === 'reaction_multiple'
       ? `+${Math.floor(Math.random() * 5) + 2}`
       : notif.name.charAt(0);
@@ -1037,7 +1050,7 @@ function renderNotificationsPage() {
     return `
       <div class="p-4 rounded-xl border ${borderCol} hover:shadow-md transition cursor-pointer group">
         <div class="flex items-start gap-3">
-          <div class="w-10 h-10 rounded-full bg-gradient-to-br ${avatarGrad} flex items-center justify-center text-white font-bold shrink-0 group-hover:scale-105 transition text-xs">${avatarContent}</div>
+          <div class="w-10 h-10 rounded-full ${avatarGrad} flex items-center justify-center text-white font-bold shrink-0 group-hover:scale-105 transition text-xs">${avatarContent}</div>
           <div class="flex-1 min-w-0">
             <p class="text-sm text-gray-800"><span class="font-semibold">${notif.name}</span> ${notif.action}</p>
             <p class="text-xs text-gray-400 mt-1"><i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${notif.time}</p>
@@ -1062,7 +1075,7 @@ function deleteNotification(id) {
   updateNotificationBadge();
 
   const toast = document.createElement('div');
-  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-gradient-to-r from-gray-600 to-gray-700 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 text-sm font-semibold';
+  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-gray-700 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 text-sm font-semibold';
   toast.style.animation = 'scaleIn 0.3s ease';
   toast.innerHTML = '<i data-lucide="trash-2" class="w-5 h-5"></i> <span>Notificación eliminada</span>';
   document.body.appendChild(toast);
@@ -1167,6 +1180,108 @@ function updateProfileDisplay() {
   if (dRole) dRole.textContent = roleMap[currentUser.role] || currentUser.role;
 }
 
+function openUserProfilePage() {
+  _closeAllOverlays();
+  currentPage = 'user-profile';
+  const pp = document.getElementById('user-profile-page');
+  pp.style.display = '';
+  pp.classList.remove('hidden');
+  _positionOverlayPage('user-profile-page');
+  _renderUserProfile();
+}
+
+function closeUserProfilePage() {
+  const pp = document.getElementById('user-profile-page');
+  pp.classList.add('hidden');
+  pp.style.display = 'none';
+  if (currentPage === 'user-profile') currentPage = 'home';
+}
+
+let _upFilter = 'all';
+
+function setUpFilter(filter) {
+  _upFilter = filter;
+  ['all', 'received', 'given'].forEach(f => {
+    const btn = document.getElementById(`up-filter-${f}`);
+    if (!btn) return;
+    if (f === filter) {
+      btn.className = 'up-filter-btn px-3 py-1 rounded-lg text-xs font-semibold transition bg-white text-[#3d2b56] shadow-sm';
+    } else {
+      btn.className = 'up-filter-btn px-3 py-1 rounded-lg text-xs font-semibold transition text-gray-500';
+    }
+  });
+  _renderUpFeed();
+}
+
+function _renderUpFeed() {
+  const u      = currentUser;
+  const userId = u?.__backendId;
+  const allRecs = window._allRecognitions || [];
+  const feed    = document.getElementById('up-feed');
+  if (!feed) return;
+
+  let recs;
+  if (_upFilter === 'given')    recs = allRecs.filter(r => r.from_user?.id === userId);
+  else if (_upFilter === 'received') recs = allRecs.filter(r => r.to_user?.id === userId);
+  else recs = allRecs.filter(r => r.from_user?.id === userId || r.to_user?.id === userId);
+
+  if (recs.length === 0) {
+    feed.innerHTML = '<p class="text-xs text-gray-400 py-2">No hay reconocimientos para mostrar.</p>';
+    return;
+  }
+
+  feed.innerHTML = recs.slice(0, 20).map(r => {
+    const isSent   = r.from_user?.id === userId;
+    const other    = isSent ? (r.to_user?.name || 'Alguien') : (r.from_user?.name || 'Alguien');
+    const otherInitial = (other[0] || '?').toUpperCase();
+    const time     = formatTimeAgo(r.created_at);
+    const program  = r.program || '';
+    const label    = isSent
+      ? `Reconociste a <span class="font-semibold text-gray-800">${other}</span>`
+      : `<span class="font-semibold text-gray-800">${other}</span> te reconoció`;
+    const badge    = isSent
+      ? `<span class="text-[10px] font-bold uppercase tracking-wide text-[#3d2b56] bg-violet-50 px-2 py-0.5 rounded-full">Dado</span>`
+      : `<span class="text-[10px] font-bold uppercase tracking-wide text-[#e87cb4] bg-rosa-50 px-2 py-0.5 rounded-full">Recibido</span>`;
+    return `<div class="flex items-start gap-3 py-3 border-b border-gray-50 last:border-0">
+      <div class="w-9 h-9 rounded-full ${getAvatarColor(other)} flex items-center justify-center text-white text-sm font-bold shrink-0">${otherInitial}</div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <p class="text-sm text-gray-600">${label}</p>
+          ${badge}
+        </div>
+        <p class="text-xs text-[#3d2b56] font-medium mt-0.5">${program}</p>
+        <p class="text-xs text-gray-400 mt-0.5">${time}</p>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _renderUserProfile() {
+  const u = currentUser;
+  if (!u) return;
+
+  const initials    = (u.name || '?').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+  const avatarColor = getAvatarColor(u.name || '');
+  const el          = id => document.getElementById(id);
+
+  const avatar = el('up-avatar');
+  avatar.textContent = initials;
+  avatar.className = `w-20 h-20 rounded-full ${avatarColor} flex items-center justify-center text-white text-3xl font-bold shrink-0`;
+
+  el('up-name').textContent    = u.name    || '—';
+  el('up-role').textContent    = u.role    || '—';
+  el('up-company').textContent = u.company || '—';
+  el('up-points').textContent  = (u.points_to_give ?? '—');
+
+  const allRecs = window._allRecognitions || [];
+  const userId  = u.__backendId;
+  el('up-given').textContent    = allRecs.filter(r => r.from_user?.id === userId).length;
+  el('up-received').textContent = allRecs.filter(r => r.to_user?.id   === userId).length;
+
+  _upFilter = 'all';
+  setUpFilter('all');
+}
+
 function openProfilePage() {
   closePointsPage();
   currentPage = 'profile';
@@ -1188,7 +1303,7 @@ function closeProfilePage() {
 
 function saveSettings() {
   const toast = document.createElement('div');
-  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-gradient-to-r from-green-600 to-emerald-500 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 text-sm font-semibold';
+  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-green-600 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 text-sm font-semibold';
   toast.style.animation = 'scaleIn 0.3s ease';
   toast.innerHTML = '<i data-lucide="check-circle" class="w-5 h-5"></i> <span>Cambios guardados correctamente ✓</span>';
   document.body.appendChild(toast);
@@ -1563,7 +1678,9 @@ async function sendRecognition() {
   try {
     // Upload image once and append to message
     let baseMessage = message;
-    if (_recogImageBase64) {
+    if (_recogImageUrl) {
+      baseMessage = message + '\n' + _recogImageUrl;
+    } else if (_recogImageBase64) {
       sendBtn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Subiendo imagen...';
       lucide.createIcons();
       const { isOk: imgOk, url } = await window.storageSdk.uploadRecognitionImage(_recogImageBase64);
@@ -1711,9 +1828,11 @@ function parseCommentMessage(message) {
   const imgs = [], textLines = [];
   for (const line of lines) {
     const t = line.trim();
-    // Match image URLs: ending in extension OR Supabase storage public URLs
+    // Match image URLs: extension, Supabase storage, or known image CDNs
     if (/^https?:\/\/\S+\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i.test(t) ||
-        /^https?:\/\/\S+\/storage\/v1\/object\/public\/\S+$/i.test(t)) {
+        /^https?:\/\/\S+\/storage\/v1\/object\/public\/\S+$/i.test(t) ||
+        /^https?:\/\/images\.unsplash\.com\/\S+$/i.test(t) ||
+        /^https?:\/\/\S+\?(.*&)?(fit=crop|auto=format|fm=jpg|fm=png)(&.*)?$/i.test(t)) {
       imgs.push(t);
     } else if (t) {
       textLines.push(t);
@@ -1757,7 +1876,7 @@ function loadMoreComments(btn) {
     const div  = document.createElement('div');
     div.className = 'flex items-start gap-2.5';
     div.innerHTML = `
-      <div class="w-7 h-7 rounded-full bg-gradient-to-br from-violet-400 to-rosita-400 flex items-center justify-center text-white text-xs font-bold shrink-0">${ci}</div>
+      <div class="w-7 h-7 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">${ci}</div>
       <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1">
         <div class="flex items-center justify-between gap-2">
           <p class="text-xs font-semibold text-gray-700">${c.user?.name || 'Usuario'}</p>
@@ -1823,7 +1942,7 @@ async function addComment(btn) {
   const newComment = document.createElement('div');
   newComment.className = 'flex items-start gap-2.5';
   newComment.innerHTML = `
-    <div class="w-7 h-7 rounded-full bg-gradient-to-br ${avatarColor} flex items-center justify-center text-white text-xs font-bold shrink-0">${initials}</div>
+    <div class="w-7 h-7 rounded-full ${avatarColor} flex items-center justify-center text-white text-xs font-bold shrink-0">${initials}</div>
     <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1">
       <div class="flex items-center justify-between gap-2">
         <p class="text-xs font-semibold text-gray-700">${currentUser.name}</p>
@@ -1912,7 +2031,7 @@ function switchPage(page) {
 // ELEMENT SDK CONFIG
 // ─────────────────────────────────────────
 const defaultConfig = {
-  platform_name:         'Allays',
+  platform_name:         'Allay',
   welcome_message:       '¡Hola, María!',
   recognize_button_text: 'Reconocer',
   store_button_text:     'Ir al Store',
@@ -2002,14 +2121,14 @@ function _setupFeedRealtime() {
 }
 
 const PROGRAM_COLORS = {
-  '🏆 Trabajo en Equipo':         'from-violet-500 to-rosa-500',
-  '🎯 Liderazgo':                 'from-blue-500 to-violet-500',
-  '💡 Innovación':                'from-lila-500 to-violet-500',
-  '🤝 Colaboración':              'from-rosa-500 to-lila-500',
-  '⭐ Actitud':                   'from-yellow-400 to-orange-400',
-  '✅ Cumplimiento de objetivos':  'from-green-400 to-teal-500',
+  '🏆 Trabajo en Equipo':         'bg-[#3d2b56]',
+  '🎯 Liderazgo':                 'bg-[#3d2b56]',
+  '💡 Innovación':                'bg-[#c9a7d4]',
+  '🤝 Colaboración':              'bg-[#f19ac4]',
+  '⭐ Actitud':                   'bg-[#f19ac4]',
+  '✅ Cumplimiento de objetivos':  'bg-[#c9a7d4]',
 };
-const AVATAR_COLORS = ['from-violet-500 to-lila-400', 'from-rosa-400 to-rosa-500', 'from-lila-400 to-violet-500'];
+const AVATAR_COLORS = ['bg-[#3d2b56]', 'bg-[#f19ac4]', 'bg-[#c9a7d4]'];
 
 function formatTimeAgo(ts) {
   const diff = Math.floor((Date.now() - new Date(ts)) / 1000);
@@ -2027,7 +2146,7 @@ function buildFeedCard(rec) {
   const senderName  = rec.from_user?.name || 'Alguien';
   const initials    = senderName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
   const avatarColor = AVATAR_COLORS[senderName.length % AVATAR_COLORS.length];
-  const gradient    = PROGRAM_COLORS[rec.program] || 'from-violet-500 to-rosa-500';
+  const gradient    = PROGRAM_COLORS[rec.program] || 'bg-[#3d2b56]';
   const programData = _getProgramByLabel(rec.program);
 
   // Parse multi-recipient group marker
@@ -2065,7 +2184,7 @@ function buildFeedCard(rec) {
     const { text: msgText, imgs } = parseCommentMessage(c.message);
     const imgHtml = imgs.map(u => `<img src="${u}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">`).join('');
     return `<div class="flex items-start gap-2.5">
-      <div class="w-7 h-7 rounded-full bg-gradient-to-br from-violet-400 to-rosita-400 flex items-center justify-center text-white text-xs font-bold shrink-0">${ci}</div>
+      <div class="w-7 h-7 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">${ci}</div>
       <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1">
         <div class="flex items-center justify-between gap-2">
           <p class="text-xs font-semibold text-gray-700">${c.user?.name || 'Usuario'}</p>
@@ -2097,7 +2216,7 @@ function buildFeedCard(rec) {
     : '';
 
   const pointsBadgeHtml2 = rec.points > 0
-    ? `<span class="points-badge bg-gradient-to-r ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${rec.points} pts</span>`
+    ? `<span class="points-badge ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${rec.points} pts</span>`
     : '';
 
   const { text: msgText, imgs: msgImgs } = parseCommentMessage(cleanMessage);
@@ -2109,7 +2228,7 @@ function buildFeedCard(rec) {
     ${bannerHtml}
     <div class="p-5">
       <div class="flex items-start gap-3 mb-3">
-        <div class="w-10 h-10 rounded-full bg-gradient-to-br ${avatarColor} flex items-center justify-center text-white font-bold shrink-0">${initials}</div>
+        <div class="w-10 h-10 rounded-full ${avatarColor} flex items-center justify-center text-white font-bold shrink-0">${initials}</div>
         <div class="flex-1 min-w-0">
           <p class="text-sm"><span class="font-bold text-gray-800">${senderName}</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">${recipientDisplay}</span></p>
           <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> ${formatTimeAgo(rec.created_at)} · <span class="text-violet-500 font-medium">${rec.program}</span></p>
@@ -2128,7 +2247,7 @@ function buildFeedCard(rec) {
       </div>
       ${recogImgHtml}<p class="text-sm text-gray-700 leading-relaxed">${msgText || ''}</p>
     </div>
-    <div class="bg-gradient-to-r from-violet-50 to-rosa-50 px-5 py-3 flex items-center justify-between">
+    <div class="bg-violet-50 px-5 py-3 flex items-center justify-between">
       <div class="flex gap-3">
         ${rBtn('❤️','hover:text-rosa-500')}
         ${rBtn('🎉','hover:text-violet-500')}
@@ -2183,11 +2302,21 @@ function closeDeleteRecognitionModal() {
 async function confirmDeleteRecognition() {
   if (!isSuperadmin()) { showErrorToast('Sin permisos para eliminar reconocimientos'); return; }
   if (!_deletingRecognitionId) return;
-  const { isOk } = await window.recognitionSdk.delete(_deletingRecognitionId);
-  if (!isOk) { showErrorToast('Error al eliminar el reconocimiento'); return; }
-  closeDeleteRecognitionModal();
-  await renderFeed(true);
-  showSuccessToast('Reconocimiento eliminado');
+  try {
+    const { isOk, error } = await window.recognitionSdk.delete(_deletingRecognitionId);
+    if (!isOk) {
+      closeDeleteRecognitionModal();
+      showErrorToast('Error al eliminar: ' + (error || 'intenta de nuevo'));
+      return;
+    }
+    closeDeleteRecognitionModal();
+    await renderFeed(true);
+    showSuccessToast('Reconocimiento eliminado');
+  } catch (e) {
+    closeDeleteRecognitionModal();
+    showErrorToast('Error inesperado al eliminar');
+    console.error('confirmDeleteRecognition error:', e);
+  }
 }
 
 async function renderFeed(reset = true) {
@@ -2212,20 +2341,21 @@ async function renderFeed(reset = true) {
 
   let data = rawData || [];
 
-  // Client-side company-member filter only for the regular list() path.
+  // Client-side filter: solo mostrar reconocimientos donde el emisor es miembro de la empresa.
+  // Esto oculta reconocimientos enviados por el superadmin u otras empresas.
   if (!usingEdgeFn && companyFilter) {
     const companyMemberIds = new Set(
       allUsers.filter(u => u.company_id === companyFilter).map(u => u.__backendId)
     );
-    data = data.filter(r =>
-      companyMemberIds.has(r.from_user?.id) || companyMemberIds.has(r.to_user?.id)
-    );
+    data = data.filter(r => companyMemberIds.has(r.from_user?.id));
   }
 
-  if (reset) container.innerHTML = '';
+  if (reset) { container.innerHTML = ''; window._allRecognitions = []; }
   document.getElementById('load-more-feed')?.remove();
 
   if (!isOk) { container.innerHTML = '<p class="text-sm text-gray-400 text-center py-8">Error al cargar el feed.</p>'; return; }
+
+  window._allRecognitions = (window._allRecognitions || []).concat(data);
   if (data.length === 0 && feedOffset === 0) {
     container.innerHTML = '<p class="text-sm text-gray-400 text-center py-8">¡Sé el primero en reconocer a alguien! 🌟</p>';
     return;
@@ -2330,10 +2460,10 @@ function renderNotificationsPage() {
     const unread = !n.read ? 'border-violet-300 bg-violet-50' : 'border-gray-200 bg-white';
     let avatarContent, text;
     if (n.type === 'recognition') {
-      avatarContent = `<div class="w-10 h-10 rounded-full bg-gradient-to-br from-violet-400 to-rosa-400 flex items-center justify-center text-white font-bold shrink-0">${(fromName[0] || '?').toUpperCase()}</div>`;
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${(fromName[0] || '?').toUpperCase()}</div>`;
       text = `<span class="font-semibold">${fromName}</span> te reconoció con <strong>+${n.data?.points} pts</strong> · ${n.data?.program}`;
     } else if (n.type === 'reaction') {
-      avatarContent = `<div class="w-10 h-10 rounded-full bg-gradient-to-br from-violet-400 to-rosa-400 flex items-center justify-center text-white font-bold shrink-0">${(fromName[0] || '?').toUpperCase()}</div>`;
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${(fromName[0] || '?').toUpperCase()}</div>`;
       text = `<span class="font-semibold">${fromName}</span> reaccionó ${n.data?.emoji} a tu reconocimiento`;
     } else if (n.type === 'program_approval_request') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0"><i data-lucide="check-square" class="w-5 h-5 text-amber-500"></i></div>`;
@@ -2345,7 +2475,7 @@ function renderNotificationsPage() {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="x-circle" class="w-5 h-5 text-red-500"></i></div>`;
       text = `${n.data?.program_emoji || '🏆'} Tu solicitud del ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${n.data?.program_name}</strong> fue rechazada por <span class="font-semibold">${n.data?.rejected_by}</span>`;
     } else {
-      avatarContent = `<div class="w-10 h-10 rounded-full bg-gradient-to-br from-violet-400 to-rosa-400 flex items-center justify-center text-white font-bold shrink-0">${(fromName[0] || '?').toUpperCase()}</div>`;
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${(fromName[0] || '?').toUpperCase()}</div>`;
       text = `<span class="font-semibold">${fromName}</span> comentó en tu reconocimiento`;
     }
     return `<div class="p-4 rounded-xl border ${unread} hover:shadow-md transition cursor-pointer group" onclick="handleNotificationClick('${n.id}')">
@@ -2677,7 +2807,7 @@ function _updateApprovalsNavBadge() {
 function _submitProgramApprovalRequest(programData, budget, rechargeFor = null) {
   const name     = currentUser?.name || 'Empleado';
   const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-  const colors   = ['from-violet-500 to-lila-400', 'from-rosa-400 to-rosa-500', 'from-lila-400 to-violet-500'];
+  const colors   = ['bg-[#3d2b56]', 'bg-[#f19ac4]', 'bg-[#c9a7d4]'];
   const color    = colors[name.length % colors.length];
 
   // For new programs (not recharges), add to companyPrograms with pending flag so the employee can see it
@@ -2841,7 +2971,7 @@ function renderApprovalsQueue() {
   container.innerHTML = pending.map(req => `
     <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hover:shadow-md transition" data-req-id="${req.id}">
       <div class="flex items-start gap-4">
-        <div class="w-10 h-10 rounded-full bg-gradient-to-br ${req.avatarColor} flex items-center justify-center text-white font-bold text-sm shrink-0">${req.avatarInitials}</div>
+        <div class="w-10 h-10 rounded-full ${req.avatarColor} flex items-center justify-center text-white font-bold text-sm shrink-0">${req.avatarInitials}</div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap mb-0.5">
             <span class="font-bold text-sm text-gray-800">${req.employee}</span>
@@ -2862,7 +2992,7 @@ function renderApprovalsQueue() {
           </div>
           <div class="flex justify-end gap-2">
             <button onclick="approveRequest('${req.id}')"
-              class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white text-sm font-semibold hover:opacity-90 transition shadow-sm">
+              class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-green-500 text-white text-sm font-semibold hover:opacity-90 transition shadow-sm">
               <i data-lucide="check" class="w-4 h-4"></i> Aprobar
             </button>
             <button onclick="rejectRequest('${req.id}')"
@@ -2903,7 +3033,7 @@ function renderApprovalsHistory() {
   container.innerHTML = items.map(req => `
     <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hover:shadow-md transition">
       <div class="flex items-start gap-4">
-        <div class="w-10 h-10 rounded-full bg-gradient-to-br ${req.avatarColor} flex items-center justify-center text-white font-bold text-sm shrink-0">${req.avatarInitials}</div>
+        <div class="w-10 h-10 rounded-full ${req.avatarColor} flex items-center justify-center text-white font-bold text-sm shrink-0">${req.avatarInitials}</div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between gap-2 flex-wrap mb-0.5">
             <div class="flex items-center gap-2 flex-wrap">
@@ -3228,7 +3358,7 @@ function _renderTopGiversWidget(recognitions) {
     const avatarGrad = AVATAR_COLORS[u.name.length % AVATAR_COLORS.length];
     return `<div class="flex items-center gap-2">
       <span class="text-xs font-bold ${medal} w-4">${i + 1}</span>
-      <div class="w-6 h-6 rounded-full bg-gradient-to-br ${avatarGrad} flex items-center justify-center text-white text-[10px] font-bold shrink-0">${initial}</div>
+      <div class="w-6 h-6 rounded-full ${avatarGrad} flex items-center justify-center text-white text-[10px] font-bold shrink-0">${initial}</div>
       <span class="text-xs text-gray-700 flex-1 truncate">${u.name}</span>
       <span class="text-[10px] font-semibold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded-full">${u.count}</span>
     </div>`;
@@ -3269,7 +3399,7 @@ function _renderProgramsUsageWidget(recognitions) {
         <span class="text-[10px] font-semibold text-violet-600">${count}</span>
       </div>
       <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-        <div class="h-full bg-gradient-to-r from-violet-400 to-pink-400 rounded-full" style="width:${pct}%"></div>
+        <div class="h-full bg-[#3d2b56] rounded-full" style="width:${pct}%"></div>
       </div>
     </div>`;
   }).join('');
@@ -3440,7 +3570,102 @@ function selectNpEmoji(emoji) {
 
 let _cropper     = null;
 let _cropContext = 'program'; // 'program' | 'recognition'
-let _recogImageBase64 = null;
+let _recogImageBase64   = null;
+let _recogImageUrl      = null;
+let _libraryCache = null;
+
+// ── Biblioteca de imágenes curada por Allay ─────────────────────────────────
+// Para agregar o reemplazar imágenes, editá este array con las URLs deseadas.
+function expandImageSection() {
+  document.getElementById('recog-img-collapsed').classList.add('hidden');
+  document.getElementById('recog-img-placeholder').classList.remove('hidden');
+  _renderImageLibrary();
+}
+
+async function _renderImageLibrary() {
+  const grid = document.getElementById('img-panel-library');
+  if (!grid) return;
+
+  // Cache permanente por sesión (URLs públicas no expiran)
+  if (_libraryCache) {
+    grid.innerHTML = _libraryCache;
+    return;
+  }
+
+  grid.innerHTML = '<div class="col-span-3 text-center py-6 text-gray-400 text-xs">Cargando imágenes...</div>';
+
+  const { data: files, error } = await _sb.storage
+    .from('image-library')
+    .list('', { limit: 100, sortBy: { column: 'name', order: 'asc' } });
+
+  if (error || !files?.length) {
+    grid.innerHTML = '<div class="col-span-3 text-center py-6 text-gray-400 text-xs">No hay imágenes en la biblioteca</div>';
+    return;
+  }
+
+  const imageFiles = files.filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f.name));
+  if (!imageFiles.length) {
+    grid.innerHTML = '<div class="col-span-3 text-center py-6 text-gray-400 text-xs">No hay imágenes en la biblioteca</div>';
+    return;
+  }
+
+  const items = imageFiles.map(f => ({
+    url:  _sb.storage.from('image-library').getPublicUrl(f.name).data.publicUrl,
+    name: f.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '),
+  }));
+
+  grid.innerHTML = items.map(item => `
+    <button type="button" onclick="selectLibraryImage('${item.url}', this)"
+      class="relative rounded-lg overflow-hidden border-2 border-transparent hover:border-violet-400 transition group aspect-video bg-gray-100"
+      title="${item.name}">
+      <img src="${item.url}" alt="${item.name}" class="w-full h-full object-cover" loading="lazy">
+      <div class="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition flex items-end justify-start p-1">
+        <span class="opacity-0 group-hover:opacity-100 text-white text-[10px] font-semibold bg-black/50 px-1.5 py-0.5 rounded-full transition capitalize">${item.name}</span>
+      </div>
+    </button>
+  `).join('');
+  _libraryCache = grid.innerHTML;
+}
+
+function switchImageTab(tab) {
+  const isLibrary = tab === 'library';
+  document.getElementById('img-panel-library').classList.toggle('hidden', !isLibrary);
+  document.getElementById('img-panel-upload').classList.toggle('hidden', isLibrary);
+  document.getElementById('img-tab-library').className = isLibrary
+    ? 'flex-1 py-1.5 text-xs font-semibold rounded-md bg-white text-violet-700 shadow-sm transition'
+    : 'flex-1 py-1.5 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-700 transition';
+  document.getElementById('img-tab-upload').className = isLibrary
+    ? 'flex-1 py-1.5 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-700 transition'
+    : 'flex-1 py-1.5 text-xs font-semibold rounded-md bg-white text-violet-700 shadow-sm transition';
+}
+
+async function selectLibraryImage(url, btn) {
+  // Highlight selected
+  document.querySelectorAll('#img-panel-library button').forEach(b =>
+    b.classList.remove('border-violet-500', 'ring-2', 'ring-violet-300')
+  );
+  btn.classList.add('border-violet-500', 'ring-2', 'ring-violet-300');
+  // Show preview immediately with the signed URL
+  const preview = document.getElementById('recog-img-preview');
+  preview.src = url;
+  document.getElementById('recog-img-preview-wrap').classList.remove('hidden');
+  document.getElementById('recog-img-placeholder').classList.add('hidden');
+  // Convert to base64 so se sube al bucket público al enviar (URL permanente en el feed)
+  try {
+    const res  = await fetch(url);
+    const blob = await res.blob();
+    const reader = new FileReader();
+    reader.onload = e => {
+      _recogImageBase64 = e.target.result;
+      _recogImageUrl    = null;
+    };
+    reader.readAsDataURL(blob);
+  } catch (e) {
+    // Fallback: usar URL firmada directamente
+    _recogImageUrl    = url;
+    _recogImageBase64 = null;
+  }
+}
 
 function previewProgramImage(input) {
   const file = input.files[0];
@@ -3530,9 +3755,15 @@ function applyCrop() {
 
 function clearRecogImage() {
   _recogImageBase64 = null;
+  _recogImageUrl    = null;
   document.getElementById('file-input').value = '';
   document.getElementById('recog-img-preview-wrap').classList.add('hidden');
-  document.getElementById('recog-img-placeholder').classList.remove('hidden');
+  document.getElementById('recog-img-placeholder').classList.add('hidden');
+  document.getElementById('recog-img-collapsed').classList.remove('hidden');
+  document.querySelectorAll('#img-panel-library button').forEach(b =>
+    b.classList.remove('border-violet-500', 'ring-2', 'ring-violet-300')
+  );
+  switchImageTab('library');
 }
 
 function clearProgramImage() {
@@ -3578,7 +3809,7 @@ function _renderNpEmployeeList(query) {
         <input type="checkbox" value="${id}" ${checked ? 'checked' : ''}
           onchange="toggleNpEmployee('${id}')"
           class="w-4 h-4 rounded border-gray-300 accent-celeste-500">
-        <div class="w-7 h-7 rounded-full bg-gradient-to-br from-celeste-400 to-rosita-400 flex items-center justify-center text-white text-xs font-bold shrink-0">
+        <div class="w-7 h-7 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">
           ${(label[0] || '?').toUpperCase()}
         </div>
         <span class="text-sm text-gray-700">${label}</span>
@@ -4126,12 +4357,12 @@ async function renderPointsPage() {
     const color    = _avatarColorFor(u.name || '');
     return `
     <div class="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition">
-      <div class="w-9 h-9 rounded-full bg-gradient-to-br ${color} flex items-center justify-center text-white text-xs font-bold shrink-0">${initials}</div>
+      <div class="w-9 h-9 rounded-full ${color} flex items-center justify-center text-white text-xs font-bold shrink-0">${initials}</div>
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-gray-800 truncate">${u.name || u.email}</p>
         <div class="flex items-center gap-2 mt-1">
           <div class="flex-1 bg-gray-100 rounded-full h-1.5">
-            <div class="bg-gradient-to-r from-violet-400 to-celeste-400 h-1.5 rounded-full" style="width:${barPct}%"></div>
+            <div class="bg-[#3d2b56] h-1.5 rounded-full" style="width:${barPct}%"></div>
           </div>
         </div>
       </div>
@@ -4141,11 +4372,7 @@ async function renderPointsPage() {
 }
 
 function _avatarColorFor(name) {
-  const colors = [
-    'from-violet-500 to-lila-400', 'from-celeste-400 to-rosita-400',
-    'from-rosa-400 to-rosa-500',   'from-lila-400 to-violet-500',
-    'from-green-400 to-celeste-400','from-amber-400 to-rosa-400',
-  ];
+  const colors = ['bg-[#3d2b56]', 'bg-[#f19ac4]', 'bg-[#c9a7d4]'];
   let h = 0;
   for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
   return colors[Math.abs(h) % colors.length];
