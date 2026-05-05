@@ -6,6 +6,10 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Solo loguear en desarrollo — no exponer errores internos en producción
+var _isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+var _log   = _isDev ? (...a) => console.error(...a) : () => {};
+
 function mapProfile(p) {
   return {
     __backendId:      p.id,
@@ -26,7 +30,7 @@ window.dataSdk = (function () {
 
   async function fetchAndNotify() {
     const { data, error } = await _sb.from('profiles').select('*');
-    if (error) { console.error('dataSdk fetch error:', error.message); return; }
+    if (error) { _log('dataSdk fetch error:', error.message); return; }
     if (_handler) _handler.onDataChanged((data || []).map(mapProfile));
   }
 
@@ -71,12 +75,12 @@ window.dataSdk = (function () {
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
           const errorMessage = json?.error || `Error ${res.status}`;
-          console.error('create-user error:', errorMessage);
+          _log('create-user error:', errorMessage);
           return { isOk: false, error: errorMessage };
         }
         return { isOk: true, data: json };
       } catch (e) {
-        console.error('create-user exception:', e);
+        _log('create-user exception:', e);
         return { isOk: false, error: e.message || 'Error de conexión' };
       }
     },
@@ -91,7 +95,7 @@ window.dataSdk = (function () {
         points_to_redeem: record.points_to_redeem,
         password_changed: record.password_changed
       }).eq('id', record.__backendId);
-      if (error) { console.error('update error:', error.message); }
+      if (error) { _log('update error:', error.message); }
       return { isOk: !error };
     },
 
@@ -99,7 +103,7 @@ window.dataSdk = (function () {
       const { error } = await _sb.functions.invoke('delete-user', {
         body: { user_id: record.__backendId }
       });
-      if (error) { console.error('delete-user error:', error); }
+      if (error) { _log('delete-user error:', error); }
       return { isOk: !error };
     }
   };
@@ -115,7 +119,7 @@ window.recognitionSdk = {
       p_message:    message,
       p_company_id: companyId
     });
-    if (error) console.error('send_recognition error:', error.message);
+    if (error) _log('send_recognition error:', error.message);
     return { isOk: !error, id: data, error };
   },
 
@@ -128,7 +132,7 @@ window.recognitionSdk = {
       p_message:      message,
       p_company_id:   companyId
     });
-    if (error) console.error('send_recognition_as error:', error.message);
+    if (error) _log('send_recognition_as error:', error.message);
     return { isOk: !error, id: data, error };
   },
 
@@ -148,13 +152,13 @@ window.recognitionSdk = {
     if (program)   query = query.eq('program', program);
 
     const { data, error } = await query.range(offset, offset + limit - 1);
-    if (error) console.error('recognitions list error:', error.message);
+    if (error) _log('recognitions list error:', error.message);
     return { isOk: !error, data: data || [] };
   },
 
   async delete(id) {
     const { error } = await _sb.from('recognitions').delete().eq('id', id);
-    if (error) console.error('recognition delete error:', error.message);
+    if (error) _log('recognition delete error:', error.message);
     return { isOk: !error };
   },
 
@@ -185,7 +189,7 @@ window.recognitionSdk = {
       .limit(limit);
     if (companyId) query = query.eq('company_id', companyId);
     const { data, error } = await query;
-    if (error) console.error('recognitions forCompany error:', error.message);
+    if (error) _log('recognitions forCompany error:', error.message);
     return { isOk: !error, data: data || [] };
   },
 
@@ -208,7 +212,7 @@ window.recognitionSdk = {
       .insert({ recognition_id: recognitionId, user_id: userId, message })
       .select('id, message, created_at, user:profiles!comments_user_id_fkey(id, name)')
       .single();
-    if (error) console.error('addComment error:', error.message);
+    if (error) _log('addComment error:', error.message);
     return { isOk: !error, data };
   },
 
@@ -225,7 +229,7 @@ window.recognitionSdk = {
       const json = await res.json().catch(() => ({}));
       return { isOk: res.ok, data: json.data || [] };
     } catch (e) {
-      console.error('listForCompany error:', e);
+      _log('listForCompany error:', e);
       return { isOk: false, data: [] };
     }
   },
@@ -248,7 +252,7 @@ window.notificationSdk = {
   async list() {
     const { data, error } = await _sb.from('notifications')
       .select('*').order('created_at', { ascending: false }).limit(50);
-    if (error) console.error('notifications list error:', error.message);
+    if (error) _log('notifications list error:', error.message);
     return { isOk: !error, data: data || [] };
   },
 
@@ -265,7 +269,7 @@ window.notificationSdk = {
       const json = await res.json().catch(() => ({}));
       return { isOk: res.ok, data: json.data || [] };
     } catch (e) {
-      console.error('listForUser error:', e);
+      _log('listForUser error:', e);
       return { isOk: false, data: [] };
     }
   },
@@ -280,10 +284,10 @@ window.notificationSdk = {
         headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ recipients, from_user_id: fromUserId, points, program }),
       });
-      if (!res.ok) console.error('sendRecognitionNotifications failed:', await res.text());
+      if (!res.ok) _log('sendRecognitionNotifications failed:', await res.text());
       return { isOk: res.ok };
     } catch (e) {
-      console.error('sendRecognitionNotifications error:', e);
+      _log('sendRecognitionNotifications error:', e);
       return { isOk: false };
     }
   },
@@ -314,10 +318,10 @@ window.notificationSdk = {
         headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ notifications }),
       });
-      if (!res.ok) console.error('send-notification failed:', await res.text());
+      if (!res.ok) _log('send-notification failed:', await res.text());
       return { isOk: res.ok };
     } catch (e) {
-      console.error('send-notification error:', e);
+      _log('send-notification error:', e);
       return { isOk: false };
     }
   }
@@ -329,13 +333,13 @@ window.rewardSdk = {
     const { data, error } = await _sb.from('rewards')
       .select('*').eq('company_id', companyId).eq('available', true)
       .order('points_cost');
-    if (error) console.error('rewards list error:', error.message);
+    if (error) _log('rewards list error:', error.message);
     return { isOk: !error, data: data || [] };
   },
 
   async redeem(rewardId) {
     const { data, error } = await _sb.rpc('redeem_reward', { p_reward_id: rewardId });
-    if (error) console.error('redeem_reward error:', error.message);
+    if (error) _log('redeem_reward error:', error.message);
     return { isOk: !error, id: data, error };
   }
 };
@@ -346,7 +350,7 @@ window.programsSdk = {
     const { data, error } = await _sb.from('programs')
       .select('*').eq('company_id', companyId)
       .order('created_at');
-    if (error) console.error('programs list error:', error.message);
+    if (error) _log('programs list error:', error.message);
     return { isOk: !error, data: data || [] };
   },
 
@@ -354,19 +358,19 @@ window.programsSdk = {
     const { data, error } = await _sb.from('programs')
       .insert({ company_id: companyId, name, emoji })
       .select().single();
-    if (error) console.error('programs create error:', error.message);
+    if (error) _log('programs create error:', error.message);
     return { isOk: !error, data };
   },
 
   async update(id, updates) {
     const { error } = await _sb.from('programs').update(updates).eq('id', id);
-    if (error) console.error('programs update error:', error.message);
+    if (error) _log('programs update error:', error.message);
     return { isOk: !error };
   },
 
   async delete(id) {
     const { error } = await _sb.from('programs').delete().eq('id', id);
-    if (error) console.error('programs delete error:', error.message);
+    if (error) _log('programs delete error:', error.message);
     return { isOk: !error };
   }
 };
@@ -384,10 +388,10 @@ window.analyticsSdk = {
         body: JSON.stringify({ company_id: companyId, analytics: true, from_date: fromISO, to_date: toISO }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) { console.error('analyticsSdk fetch error:', json.error); return []; }
+      if (!res.ok) { _log('analyticsSdk fetch error:', json.error); return []; }
       return json.data || [];
     } catch (e) {
-      console.error('analyticsSdk fetch exception:', e);
+      _log('analyticsSdk fetch exception:', e);
       return [];
     }
   },
@@ -491,11 +495,11 @@ window.storageSdk = {
       const ext  = file.name.split('.').pop().toLowerCase() || 'jpg';
       const path = `comments/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
       const { error } = await _sb.storage.from('comment-images').upload(path, file, { contentType: file.type });
-      if (error) { console.error('image upload error:', error.message); return { isOk: false }; }
+      if (error) { _log('image upload error:', error.message); return { isOk: false }; }
       const { data: { publicUrl } } = _sb.storage.from('comment-images').getPublicUrl(path);
       return { isOk: true, url: publicUrl };
     } catch (e) {
-      console.error('storageSdk upload exception:', e);
+      _log('storageSdk upload exception:', e);
       return { isOk: false };
     }
   },
@@ -508,7 +512,7 @@ window.storageSdk = {
       const file = new File([blob], `recognition_${Date.now()}.jpg`, { type: 'image/jpeg' });
       return this.uploadCommentImage(file);
     } catch (e) {
-      console.error('uploadRecognitionImage exception:', e);
+      _log('uploadRecognitionImage exception:', e);
       return { isOk: false };
     }
   }
@@ -523,7 +527,7 @@ window.redemptionsSdk = {
       .limit(limit);
     if (userId) query = query.eq('user_id', userId);
     const { data, error } = await query;
-    if (error) console.error('redemptions list error:', error.message);
+    if (error) _log('redemptions list error:', error.message);
     return { isOk: !error, data: data || [] };
   }
 };

@@ -1,3 +1,7 @@
+// Solo loguear en desarrollo — no exponer errores internos en producción
+var _isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+var _log   = _isDev ? (...a) => console.error(...a) : () => {};
+
 // ─────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────
@@ -135,6 +139,18 @@ let allUsers = [];
 let isLoggedIn = false;
 let notificationsTab = 'all';
 
+// ─────────────────────────────────────────
+// HTML ESCAPE — usar en todo innerHTML con datos de usuario
+// ─────────────────────────────────────────
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 let notificationsList = [
   { id: 1, type: 'recognition',      name: 'Carlos Ruiz',         action: 'reaccionó a tu reconocimiento',  emoji: '❤️', time: '2 horas',  read: false },
   { id: 2, type: 'comment',          name: 'Ana López',            action: 'comentó en tu reconocimiento',   message: '¡Totalmente merecido! María es increíble 💜', time: '2 horas',  read: false },
@@ -264,13 +280,14 @@ async function handleLogin(e) {
       _loadApprovals();
       loadHomeSidebar();
       _setupFeedRealtime();
+      renderWeeklyRecap();
       _applySidebarState();
       _initSidebarTooltip();
       showSuccessToast(`¡Bienvenido, ${currentUser.name}!`);
       lucide.createIcons();
     }
   } catch (err) {
-    console.error('Login error:', err);
+    _log('Login error:', err);
     errorText.textContent = 'Error de conexión. Recargá la página e intentá de nuevo.';
     errorDiv.classList.remove('hidden');
     loginBtn.disabled = false;
@@ -383,7 +400,7 @@ async function saveNewPassword() {
     updatePointsDisplay();
     showSuccessToast('¡Contraseña establecida correctamente! Bienvenido.');
   } catch (error) {
-    console.error('Error saving password:', error);
+    _log('Error saving password:', error);
     errorText.textContent = 'Error al procesar la solicitud';
     errorDiv.classList.remove('hidden');
   } finally {
@@ -409,7 +426,7 @@ function logoutFromPasswordChange() {
 }
 
 function copyToClipboard(text) {
-  navigator.clipboard.writeText(text).then(() => showSuccessToast('Contraseña copiada')).catch(console.error);
+  navigator.clipboard.writeText(text).then(() => showSuccessToast('Contraseña copiada')).catch(_log);
 }
 
 // ─────────────────────────────────────────
@@ -459,7 +476,7 @@ function filterEmployeesByCompany() {
 
 async function initDataSDK() {
   const result = await window.dataSdk.init(dataHandler);
-  if (!result.isOk) console.error('Failed to initialize Data SDK');
+  if (!result.isOk) _log('Failed to initialize Data SDK');
 }
 
 initDataSDK();
@@ -512,36 +529,36 @@ function renderEmployeesList() {
     <div class="p-4 rounded-xl border border-gray-200 hover:border-violet-300 hover:bg-violet-50/30 transition flex items-center justify-between">
       <div class="flex-1">
         <div class="flex items-center gap-2">
-          <p class="text-sm font-semibold text-gray-800">${emp.name}</p>
-          <span class="text-xs font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded border border-gray-200">${emp.company_id}</span>
+          <p class="text-sm font-semibold text-gray-800">${esc(emp.name)}</p>
+          <span class="text-xs font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded border border-gray-200">${esc(emp.company_id)}</span>
           ${emp.role === 'superadmin' ? '<span class="text-xs font-semibold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">Superadmin</span>' : emp.role === 'admin' ? '<span class="text-xs font-semibold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">Admin</span>' : '<span class="text-xs font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Empleado</span>'}
         </div>
-        <p class="text-xs text-gray-500 mt-0.5">${emp.email} · ${emp.department}</p>
+        <p class="text-xs text-gray-500 mt-0.5">${esc(emp.email)} · ${esc(emp.department)}</p>
       </div>
       <div class="flex items-center gap-3 shrink-0">
         <div class="text-right">
           <div class="flex items-center gap-1 text-sm">
-            <span class="font-semibold text-violet-600">${emp.points_to_give}</span>
+            <span class="font-semibold text-violet-600">${Number(emp.points_to_give)}</span>
             <span class="text-xs text-gray-400">para dar</span>
           </div>
           <div class="flex items-center gap-1 text-sm mt-1">
-            <span class="font-semibold text-green-600">${emp.points_to_redeem}</span>
+            <span class="font-semibold text-green-600">${Number(emp.points_to_redeem)}</span>
             <span class="text-xs text-gray-400">para canjear</span>
           </div>
         </div>
         ${canManage ? `
-        <button onclick="openPointsModal('${emp.__backendId}', '${emp.name.replace(/'/g,"\\'")}', ${emp.points_to_give}, ${emp.points_to_redeem})" class="p-2 rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-600 transition" title="Gestionar puntos">
+        <button onclick="openPointsModal(${JSON.stringify(emp.__backendId)}, ${JSON.stringify(emp.name)}, ${Number(emp.points_to_give)}, ${Number(emp.points_to_redeem)})" class="p-2 rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-600 transition" title="Gestionar puntos">
           <i data-lucide="coins" class="w-4 h-4"></i>
         </button>` : ''}
         ${currentUser?.role === 'superadmin' ? `
-        <button onclick="impersonateEmployee('${emp.__backendId}')" class="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition" title="Usar cuenta de este empleado">
+        <button onclick="impersonateEmployee(${JSON.stringify(emp.__backendId)})" class="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition" title="Usar cuenta de este empleado">
           <i data-lucide="user-check" class="w-4 h-4"></i>
         </button>
-        <button onclick="openRoleModal('${emp.__backendId}', '${emp.name.replace(/'/g,"\\'")}', '${emp.email}', '${emp.role}')" class="p-2 rounded-lg hover:bg-purple-50 text-gray-400 hover:text-purple-600 transition" title="Cambiar rol">
+        <button onclick="openRoleModal(${JSON.stringify(emp.__backendId)}, ${JSON.stringify(emp.name)}, ${JSON.stringify(emp.email)}, ${JSON.stringify(emp.role)})" class="p-2 rounded-lg hover:bg-purple-50 text-gray-400 hover:text-purple-600 transition" title="Cambiar rol">
           <i data-lucide="shield" class="w-4 h-4"></i>
         </button>` : ''}
         ${canManage ? `
-        <button onclick="deleteEmployee('${emp.__backendId}')" class="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Eliminar empleado">
+        <button onclick="deleteEmployee(${JSON.stringify(emp.__backendId)})" class="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Eliminar empleado">
           <i data-lucide="trash-2" class="w-4 h-4"></i>
         </button>` : ''}
       </div>
@@ -578,13 +595,13 @@ function renderPeopleList() {
     const isSelected  = _selectedRecipients.some(r => r.id === emp.__backendId);
     return `
       <div class="person-item flex items-center gap-3 p-3 rounded-xl hover:bg-violet-50 cursor-pointer transition border ${isSelected ? 'bg-violet-50 border-violet-300' : 'border-transparent hover:border-violet-200'}"
-           data-name="${emp.name}" data-id="${emp.__backendId}" data-email="${emp.email}" onclick="toggleRecipient(this)">
+           data-name="${esc(emp.name)}" data-id="${esc(emp.__backendId)}" data-email="${esc(emp.email)}" onclick="toggleRecipient(this)">
         <div class="w-10 h-10 rounded-full ${avatarColor} flex items-center justify-center text-white font-bold shrink-0">
-          ${initials}
+          ${esc(initials)}
         </div>
         <div class="flex-1 min-w-0">
-          <p class="text-sm font-semibold text-gray-800">${emp.name}</p>
-          <p class="text-xs text-gray-500">${emp.department} · ${emp.email}</p>
+          <p class="text-sm font-semibold text-gray-800">${esc(emp.name)}</p>
+          <p class="text-xs text-gray-500">${esc(emp.department)} · ${esc(emp.email)}</p>
         </div>
         <div class="w-5 h-5 rounded-full border-2 ${isSelected ? 'bg-violet-500 border-violet-500' : 'border-gray-300'} flex items-center justify-center shrink-0 transition">
           ${isSelected ? '<svg viewBox="0 0 12 12" fill="none" class="w-3 h-3"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
@@ -928,7 +945,7 @@ async function saveRoleChange() {
 // ─────────────────────────────────────────
 function showSuccessToast(msg) {
   const toast = document.getElementById('success-toast');
-  toast.innerHTML = `<i data-lucide="check-circle" class="w-5 h-5"></i> <span>${msg}</span>`;
+  toast.innerHTML = `<i data-lucide="check-circle" class="w-5 h-5"></i> <span>${esc(msg)}</span>`;
   toast.classList.remove('hidden');
   lucide.createIcons();
   setTimeout(() => toast.classList.add('hidden'), 3000);
@@ -1722,7 +1739,7 @@ async function sendRecognition() {
         sendBtn.innerHTML = `<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Enviando (${sentCount}/${n})...`;
         lucide.createIcons();
       } else {
-        console.error('sendAs error for', recip.name, error);
+        _log('sendAs error for', recip.name, error);
       }
     }
 
@@ -1756,10 +1773,11 @@ async function sendRecognition() {
       .map(r => ({ user_id: r.id, name: r.name }));
     window.notificationSdk.sendRecognitionNotifications(
       notifRecipients, currentUser.__backendId, points, selectedProgram
-    ).catch(e => console.error('notification send error:', e));
+    ).catch(e => _log('notification send error:', e));
 
     await window.dataSdk.refresh();
     updateAllPointsDisplays();
+    _incrementWeeklyRecap();
     await renderFeed(true);
     loadHomeSidebar();
     loadNotifications();
@@ -1771,7 +1789,7 @@ async function sendRecognition() {
       : `¡Reconocimiento enviado ${plural}!`;
     showSuccessToast(successMsg);
   } catch (err) {
-    console.error('Error sending recognition:', err);
+    _log('Error sending recognition:', err);
     showErrorToast('Error al enviar reconocimiento');
   } finally {
     sendBtn.disabled = false;
@@ -1801,6 +1819,76 @@ function updateAllPointsDisplays() {
 }
 
 function updatePointsDisplay() { updateAllPointsDisplays(); }
+
+// ─────────────────────────────────────────
+// WEEKLY RECAP WIDGET
+// ─────────────────────────────────────────
+function _weeklyKey() {
+  const d = new Date();
+  const jan1 = new Date(d.getFullYear(), 0, 1);
+  const week = Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7);
+  return `weekly_v1_${currentUser?.email || 'anon'}_${d.getFullYear()}_W${week}`;
+}
+
+function _getWeeklyData() {
+  try {
+    const raw = localStorage.getItem(_weeklyKey());
+    if (raw) return JSON.parse(raw);
+  } catch (_) {}
+  return { days: [false, false, false, false, false, false, false], count: 0 };
+}
+
+function _saveWeeklyData(data) {
+  try { localStorage.setItem(_weeklyKey(), JSON.stringify(data)); } catch (_) {}
+}
+
+function _todayIndex() {
+  return (new Date().getDay() + 6) % 7;
+}
+
+const WEEKLY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+const WEEKLY_PHRASES = [
+  '0 reconocimientos esta semana',
+  '¡Empezaste la semana! 🌱',
+  '¡Vas bien, seguí así! 🌟',
+  '¡A mitad de semana! 💪',
+  '¡Casi todos los días! 🔥',
+  '¡Increíble semana! ⭐',
+  '¡Semana casi perfecta! 🏆',
+  '¡Semana perfecta! 🎉',
+];
+
+function renderWeeklyRecap() {
+  const textEl = document.getElementById('weekly-recap-text');
+  const barsEl = document.getElementById('weekly-recap-bars');
+  if (!textEl || !barsEl) return;
+  const data   = _getWeeklyData();
+  const today  = _todayIndex();
+  const count  = data.count || 0;
+  textEl.textContent = WEEKLY_PHRASES[Math.min(count, WEEKLY_PHRASES.length - 1)];
+  barsEl.innerHTML = WEEKLY_LABELS.map((label, i) => {
+    const filled  = data.days[i];
+    const isToday = i === today;
+    const bar = filled
+      ? 'w-full h-5 rounded-sm bg-gradient-to-b from-violet-400 to-rosa-400'
+      : isToday
+        ? 'w-full h-5 rounded-sm bg-violet-100 border border-violet-300'
+        : 'w-full h-5 rounded-sm bg-gray-100';
+    return `<div class="flex flex-col items-center gap-1 flex-1">
+      <div class="${bar}"></div>
+      <span class="text-[9px] font-medium ${filled ? 'text-violet-600' : isToday ? 'text-violet-400' : 'text-gray-300'}">${label}</span>
+    </div>`;
+  }).join('');
+}
+
+function _incrementWeeklyRecap() {
+  if (!currentUser) return;
+  const data  = _getWeeklyData();
+  data.days[_todayIndex()] = true;
+  data.count = (data.count || 0) + 1;
+  _saveWeeklyData(data);
+  renderWeeklyRecap();
+}
 
 // ─────────────────────────────────────────
 // REACTIONS & COMMENTS
@@ -1871,7 +1959,7 @@ function loadMoreComments(btn) {
   const next       = all.slice(shown, shown + STEP);
 
   next.forEach(c => {
-    const ci   = (c.user?.name || '?').split(' ').map(n => n[0]).join('').substring(0, 1).toUpperCase();
+    const ci   = esc((c.user?.name || '?').split(' ').map(n => n[0]).join('').substring(0, 1).toUpperCase());
     const time = c.created_at ? formatTimeAgo(c.created_at) : '';
     const div  = document.createElement('div');
     div.className = 'flex items-start gap-2.5';
@@ -1879,10 +1967,10 @@ function loadMoreComments(btn) {
       <div class="w-7 h-7 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">${ci}</div>
       <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1">
         <div class="flex items-center justify-between gap-2">
-          <p class="text-xs font-semibold text-gray-700">${c.user?.name || 'Usuario'}</p>
+          <p class="text-xs font-semibold text-gray-700">${esc(c.user?.name || 'Usuario')}</p>
           ${time ? `<span class="text-[10px] text-gray-400 shrink-0">${time}</span>` : ''}
         </div>
-        ${(() => { const { text, imgs } = parseCommentMessage(c.message); return (text ? `<p class="text-xs text-gray-600 mt-0.5">${text}</p>` : '') + imgs.map(u => `<img src="${u}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">`).join(''); })()}
+        ${(() => { const { text, imgs } = parseCommentMessage(c.message); return (text ? `<p class="text-xs text-gray-600 mt-0.5">${esc(text)}</p>` : '') + imgs.map(u => `<img src="${esc(u)}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">`).join(''); })()}
       </div>`;
     list.appendChild(div);
   });
@@ -1942,14 +2030,14 @@ async function addComment(btn) {
   const newComment = document.createElement('div');
   newComment.className = 'flex items-start gap-2.5';
   newComment.innerHTML = `
-    <div class="w-7 h-7 rounded-full ${avatarColor} flex items-center justify-center text-white text-xs font-bold shrink-0">${initials}</div>
+    <div class="w-7 h-7 rounded-full ${avatarColor} flex items-center justify-center text-white text-xs font-bold shrink-0">${esc(initials)}</div>
     <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1">
       <div class="flex items-center justify-between gap-2">
-        <p class="text-xs font-semibold text-gray-700">${currentUser.name}</p>
+        <p class="text-xs font-semibold text-gray-700">${esc(currentUser.name)}</p>
         <span class="text-[10px] text-gray-400 shrink-0">Ahora</span>
       </div>
-      ${text ? `<p class="text-xs text-gray-600 mt-0.5">${text}</p>` : ''}
-      ${localImgUrl ? `<img src="${localImgUrl}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">` : ''}
+      ${text ? `<p class="text-xs text-gray-600 mt-0.5">${esc(text)}</p>` : ''}
+      ${localImgUrl ? `<img src="${esc(localImgUrl)}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">` : ''}
     </div>`;
   container.appendChild(newComment);
 
@@ -2020,6 +2108,8 @@ function switchPage(page) {
   if (homeStrip)     homeStrip.style.display     = isHome ? '' : 'none';
   if (homeRightCol)  homeRightCol.style.display  = isHome ? '' : 'none';
   if (quickRecognize) quickRecognize.style.display = 'flex';
+
+  if (isHome) renderWeeklyRecap();
 
   if (page === 'store') openStore();
   else if (page === 'programs') openProgramsPage();
@@ -2144,7 +2234,7 @@ function _getProgramByLabel(label) {
 
 function buildFeedCard(rec) {
   const senderName  = rec.from_user?.name || 'Alguien';
-  const initials    = senderName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+  const initials    = esc(senderName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2));
   const avatarColor = AVATAR_COLORS[senderName.length % AVATAR_COLORS.length];
   const gradient    = PROGRAM_COLORS[rec.program] || 'bg-[#3d2b56]';
   const programData = _getProgramByLabel(rec.program);
@@ -2179,18 +2269,18 @@ function buildFeedCard(rec) {
   const allComments      = rec.comments || [];
 
   const buildCommentHtml = (c) => {
-    const ci   = (c.user?.name || '?').split(' ').map(n => n[0]).join('').substring(0, 1).toUpperCase();
+    const ci   = esc((c.user?.name || '?').split(' ').map(n => n[0]).join('').substring(0, 1).toUpperCase());
     const time = c.created_at ? formatTimeAgo(c.created_at) : '';
     const { text: msgText, imgs } = parseCommentMessage(c.message);
-    const imgHtml = imgs.map(u => `<img src="${u}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">`).join('');
+    const imgHtml = imgs.map(u => `<img src="${esc(u)}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">`).join('');
     return `<div class="flex items-start gap-2.5">
       <div class="w-7 h-7 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">${ci}</div>
       <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1">
         <div class="flex items-center justify-between gap-2">
-          <p class="text-xs font-semibold text-gray-700">${c.user?.name || 'Usuario'}</p>
+          <p class="text-xs font-semibold text-gray-700">${esc(c.user?.name || 'Usuario')}</p>
           ${time ? `<span class="text-[10px] text-gray-400 shrink-0">${time}</span>` : ''}
         </div>
-        ${msgText ? `<p class="text-xs text-gray-600 mt-0.5">${msgText}</p>` : ''}
+        ${msgText ? `<p class="text-xs text-gray-600 mt-0.5">${esc(msgText)}</p>` : ''}
         ${imgHtml}
       </div>
     </div>`;
@@ -2211,17 +2301,17 @@ function buildFeedCard(rec) {
   card.dataset.shownComments = visibleComments.length;
   const bannerHtml = programData?.image
     ? `<div class="w-full h-36 overflow-hidden">
-         <img src="${programData.image}" class="w-full h-full object-cover" alt="${programData.name}">
+         <img src="${esc(programData.image)}" class="w-full h-full object-cover" alt="${esc(programData.name)}">
        </div>`
     : '';
 
   const pointsBadgeHtml2 = rec.points > 0
-    ? `<span class="points-badge ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${rec.points} pts</span>`
+    ? `<span class="points-badge ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${Number(rec.points)} pts</span>`
     : '';
 
   const { text: msgText, imgs: msgImgs } = parseCommentMessage(cleanMessage);
   const recogImgHtml = msgImgs.length > 0
-    ? `<img src="${msgImgs[0]}" class="w-full rounded-xl object-cover max-h-60 mb-3 border border-gray-100" loading="lazy">`
+    ? `<img src="${esc(msgImgs[0])}" class="w-full rounded-xl object-cover max-h-60 mb-3 border border-gray-100" loading="lazy">`
     : '';
 
   card.innerHTML = `
@@ -2230,8 +2320,8 @@ function buildFeedCard(rec) {
       <div class="flex items-start gap-3 mb-3">
         <div class="w-10 h-10 rounded-full ${avatarColor} flex items-center justify-center text-white font-bold shrink-0">${initials}</div>
         <div class="flex-1 min-w-0">
-          <p class="text-sm"><span class="font-bold text-gray-800">${senderName}</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">${recipientDisplay}</span></p>
-          <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> ${formatTimeAgo(rec.created_at)} · <span class="text-violet-500 font-medium">${rec.program}</span></p>
+          <p class="text-sm"><span class="font-bold text-gray-800">${esc(senderName)}</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">${esc(recipientDisplay)}</span></p>
+          <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> ${formatTimeAgo(rec.created_at)} · <span class="text-violet-500 font-medium">${esc(rec.program)}</span></p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           ${pointsBadgeHtml2}
@@ -2245,7 +2335,7 @@ function buildFeedCard(rec) {
           </div>
         </div>
       </div>
-      ${recogImgHtml}<p class="text-sm text-gray-700 leading-relaxed">${msgText || ''}</p>
+      ${recogImgHtml}<p class="text-sm text-gray-700 leading-relaxed">${esc(msgText || '')}</p>
     </div>
     <div class="bg-violet-50 px-5 py-3 flex items-center justify-between">
       <div class="flex gap-3">
@@ -2315,7 +2405,7 @@ async function confirmDeleteRecognition() {
   } catch (e) {
     closeDeleteRecognitionModal();
     showErrorToast('Error inesperado al eliminar');
-    console.error('confirmDeleteRecognition error:', e);
+    _log('confirmDeleteRecognition error:', e);
   }
 }
 
@@ -2372,7 +2462,7 @@ async function renderFeed(reset = true) {
   });
   deduped.forEach(rec => {
     try { container.appendChild(buildFeedCard(rec)); }
-    catch(e) { console.error('[feed] buildFeedCard error:', e, rec); }
+    catch(e) { _log('[feed] buildFeedCard error:', e, rec); }
   });
   feedOffset += data.length;
 
@@ -2416,24 +2506,24 @@ function renderNotificationsDropdown() {
     let icon, iconColor, text;
     if (n.type === 'recognition') {
       icon = 'heart'; iconColor = 'rose';
-      text = `<span class="font-semibold">${fromName}</span> te reconoció (+${n.data?.points} pts)`;
+      text = `<span class="font-semibold">${esc(fromName)}</span> te reconoció (+${Number(n.data?.points)} pts)`;
     } else if (n.type === 'reaction') {
       icon = 'smile'; iconColor = 'violet';
-      text = `<span class="font-semibold">${fromName}</span> reaccionó ${n.data?.emoji} a tu reconocimiento`;
+      text = `<span class="font-semibold">${esc(fromName)}</span> reaccionó ${esc(n.data?.emoji)} a tu reconocimiento`;
     } else if (n.type === 'program_approval_request') {
       icon = 'check-square'; iconColor = 'amber';
-      text = `${n.data?.program_emoji || '🏆'} <span class="font-semibold">${n.data?.requester_name}</span> solicita aprobación para <strong>${n.data?.program_name}</strong> (${n.data?.points} pts)`;
+      text = `${n.data?.program_emoji || '🏆'} <span class="font-semibold">${esc(n.data?.requester_name)}</span> solicita aprobación para <strong>${esc(n.data?.program_name)}</strong> (${Number(n.data?.points)} pts)`;
     } else if (n.type === 'program_approved') {
       icon = 'check-circle'; iconColor = 'green';
-      text = `${n.data?.program_emoji || '🏆'} Tu programa <strong>${n.data?.program_name}</strong> fue aprobado por <span class="font-semibold">${n.data?.approved_by}</span>`;
+      text = `${n.data?.program_emoji || '🏆'} Tu programa <strong>${esc(n.data?.program_name)}</strong> fue aprobado por <span class="font-semibold">${esc(n.data?.approved_by)}</span>`;
     } else if (n.type === 'program_rejected') {
       icon = 'x-circle'; iconColor = 'red';
-      text = `${n.data?.program_emoji || '🏆'} Tu solicitud de <strong>${n.data?.program_name}</strong> fue rechazada`;
+      text = `${n.data?.program_emoji || '🏆'} Tu solicitud de <strong>${esc(n.data?.program_name)}</strong> fue rechazada`;
     } else {
       icon = 'message-circle'; iconColor = 'blue';
-      text = `<span class="font-semibold">${fromName}</span> comentó en tu reconocimiento`;
+      text = `<span class="font-semibold">${esc(fromName)}</span> comentó en tu reconocimiento`;
     }
-    return `<div class="notif-item p-3 rounded-lg ${n.read ? '' : 'bg-violet-50'} hover:bg-gray-50 cursor-pointer transition border border-transparent hover:border-gray-200" onclick="handleNotificationClick('${n.id}')">
+    return `<div class="notif-item p-3 rounded-lg ${n.read ? '' : 'bg-violet-50'} hover:bg-gray-50 cursor-pointer transition border border-transparent hover:border-gray-200" onclick="handleNotificationClick(${JSON.stringify(n.id)})">
       <div class="flex items-start gap-2.5">
         <div class="w-8 h-8 rounded-full bg-${iconColor}-100 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="${icon}" class="w-4 h-4 text-${iconColor}-500"></i></div>
         <div class="min-w-0 flex-1"><p class="text-xs text-gray-700">${text}</p><p class="text-[11px] text-gray-400 mt-0.5">${formatTimeAgo(n.created_at)}</p></div>
@@ -2460,29 +2550,29 @@ function renderNotificationsPage() {
     const unread = !n.read ? 'border-violet-300 bg-violet-50' : 'border-gray-200 bg-white';
     let avatarContent, text;
     if (n.type === 'recognition') {
-      avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${(fromName[0] || '?').toUpperCase()}</div>`;
-      text = `<span class="font-semibold">${fromName}</span> te reconoció con <strong>+${n.data?.points} pts</strong> · ${n.data?.program}`;
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${esc((fromName[0] || '?').toUpperCase())}</div>`;
+      text = `<span class="font-semibold">${esc(fromName)}</span> te reconoció con <strong>+${Number(n.data?.points)} pts</strong> · ${esc(n.data?.program)}`;
     } else if (n.type === 'reaction') {
-      avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${(fromName[0] || '?').toUpperCase()}</div>`;
-      text = `<span class="font-semibold">${fromName}</span> reaccionó ${n.data?.emoji} a tu reconocimiento`;
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${esc((fromName[0] || '?').toUpperCase())}</div>`;
+      text = `<span class="font-semibold">${esc(fromName)}</span> reaccionó ${esc(n.data?.emoji)} a tu reconocimiento`;
     } else if (n.type === 'program_approval_request') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0"><i data-lucide="check-square" class="w-5 h-5 text-amber-500"></i></div>`;
-      text = `${n.data?.program_emoji || '🏆'} <span class="font-semibold">${n.data?.requester_name}</span> solicita aprobación para el ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${n.data?.program_name}</strong> · ${n.data?.points} pts`;
+      text = `${n.data?.program_emoji || '🏆'} <span class="font-semibold">${esc(n.data?.requester_name)}</span> solicita aprobación para el ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${esc(n.data?.program_name)}</strong> · ${Number(n.data?.points)} pts`;
     } else if (n.type === 'program_approved') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0"><i data-lucide="check-circle" class="w-5 h-5 text-green-500"></i></div>`;
-      text = `${n.data?.program_emoji || '🏆'} Tu ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${n.data?.program_name}</strong> fue aprobado por <span class="font-semibold">${n.data?.approved_by}</span>`;
+      text = `${n.data?.program_emoji || '🏆'} Tu ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${esc(n.data?.program_name)}</strong> fue aprobado por <span class="font-semibold">${esc(n.data?.approved_by)}</span>`;
     } else if (n.type === 'program_rejected') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="x-circle" class="w-5 h-5 text-red-500"></i></div>`;
-      text = `${n.data?.program_emoji || '🏆'} Tu solicitud del ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${n.data?.program_name}</strong> fue rechazada por <span class="font-semibold">${n.data?.rejected_by}</span>`;
+      text = `${n.data?.program_emoji || '🏆'} Tu solicitud del ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${esc(n.data?.program_name)}</strong> fue rechazada por <span class="font-semibold">${esc(n.data?.rejected_by)}</span>`;
     } else {
-      avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${(fromName[0] || '?').toUpperCase()}</div>`;
-      text = `<span class="font-semibold">${fromName}</span> comentó en tu reconocimiento`;
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${esc((fromName[0] || '?').toUpperCase())}</div>`;
+      text = `<span class="font-semibold">${esc(fromName)}</span> comentó en tu reconocimiento`;
     }
-    return `<div class="p-4 rounded-xl border ${unread} hover:shadow-md transition cursor-pointer group" onclick="handleNotificationClick('${n.id}')">
+    return `<div class="p-4 rounded-xl border ${unread} hover:shadow-md transition cursor-pointer group" onclick="handleNotificationClick(${JSON.stringify(n.id)})">
       <div class="flex items-start gap-3">
         ${avatarContent}
         <div class="flex-1 min-w-0"><p class="text-sm text-gray-800">${text}</p><p class="text-xs text-gray-400 mt-1"><i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${formatTimeAgo(n.created_at)}</p></div>
-        <button onclick="event.stopPropagation(); deleteNotification('${n.id}')" class="p-2 rounded-lg hover:bg-red-50 transition"><i data-lucide="trash-2" class="w-4 h-4 text-gray-400 hover:text-red-500"></i></button>
+        <button onclick="event.stopPropagation(); deleteNotification(${JSON.stringify(n.id)})" class="p-2 rounded-lg hover:bg-red-50 transition"><i data-lucide="trash-2" class="w-4 h-4 text-gray-400 hover:text-red-500"></i></button>
       </div>
     </div>`;
   }).join('');
@@ -2868,7 +2958,7 @@ function _submitProgramApprovalRequest(programData, budget, rechargeFor = null) 
         is_recharge:    !!rechargeFor,
         req_id:         req.id,
       },
-    }))).catch(e => console.error('approval notification error:', e));
+    }))).catch(e => _log('approval notification error:', e));
   }
 }
 
@@ -3125,7 +3215,7 @@ function approveRequest(reqId) {
         is_recharge:   !!req.rechargeFor,
         approved_by:   currentUser?.name || 'Admin',
       },
-    }]).catch(e => console.error('approved notification error:', e));
+    }]).catch(e => _log('approved notification error:', e));
   }
 
   renderApprovalsPage();
@@ -3168,7 +3258,7 @@ function rejectRequest(reqId) {
         is_recharge:   !!req.rechargeFor,
         rejected_by:   currentUser?.name || 'Admin',
       },
-    }]).catch(e => console.error('rejected notification error:', e));
+    }]).catch(e => _log('rejected notification error:', e));
   }
 
   renderApprovalsPage();

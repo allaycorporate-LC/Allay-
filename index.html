@@ -5,6 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Allay - Reconocimiento Interno</title>
 
+  <meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src  'self' 'unsafe-inline' 'unsafe-eval'
+              https://cdn.tailwindcss.com
+              https://cdn.jsdelivr.net;
+  style-src   'self' 'unsafe-inline'
+              https://fonts.googleapis.com
+              https://cdn.jsdelivr.net;
+  font-src    https://fonts.gstatic.com
+              https://cdn.jsdelivr.net;
+  img-src     'self' data: blob:
+              https://*.supabase.co
+              https://supabase.co;
+  connect-src 'self'
+              https://*.supabase.co
+              wss://*.supabase.co
+              https://api.resend.com
+              https://cdn.jsdelivr.net;
+  object-src  'none';
+  base-uri    'self';
+  form-action 'self';
+">
+
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -503,6 +526,15 @@
 
         <!-- Right column: activity + top -->
         <div id="home-right-col" class="shrink-0 space-y-3" style="flex:0 0 38%;max-width:38%;">
+
+          <!-- Reconocimientos esta semana -->
+          <div id="weekly-recap-widget" class="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+            <h3 class="font-semibold text-xs text-gray-700 mb-2.5 flex items-center gap-1.5">
+              <i data-lucide="flame" class="w-3.5 h-3.5 text-orange-400"></i> Mi semana
+            </h3>
+            <p id="weekly-recap-text" class="text-xs text-gray-500 mb-2.5">0 reconocimientos esta semana</p>
+            <div id="weekly-recap-bars" class="flex gap-1.5"></div>
+          </div>
 
           <!-- Actividad reciente -->
           <div class="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
