@@ -2,14 +2,15 @@
 // Allay — Auto Recognitions
 //
 // Envía reconocimientos automáticos de cumpleaños y aniversario.
-// Llamar diariamente desde un Supabase Cron Job:
-//   select cron.schedule('auto-recognitions', '0 9 * * *',
+// Cron Job (cada 15 minutos):
+//   select cron.schedule('allay-auto-recognitions', '*/15 * * * *',
 //     $$select net.http_post(
-//       url := 'https://<project>.functions.supabase.co/send-auto-recognitions',
-//       headers := '{"Authorization": "Bearer <service_role_key>"}'::jsonb
-//     )$$);
+//       url := 'https://smuwnjpmpmwfuysrxkaa.supabase.co/functions/v1/send-auto-recognitions',
+//       headers := '{"Content-Type":"application/json","Authorization":"Bearer <service_role_key>"}'::jsonb,
+//       body := '{}'::jsonb)$$);
 //
-// También puede llamarse manualmente desde el admin panel.
+// La función sólo procesa empresas cuya send_time (HH:MM UTC) coincida
+// con la hora actual en UTC (redondeada a bloques de 15 min).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -20,7 +21,7 @@ const corsHeaders = {
 };
 
 function fillTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key) => vars[key] || '');
+  return template.replace(/\{([^}]+)\}/g, (_, key) => vars[key] ?? '');
 }
 
 function todayDDMM(): string {
@@ -43,6 +44,15 @@ function isAnniversaryToday(dateStr: string): boolean {
   return `${dd}/${mm}` === todayDDMM();
 }
 
+// Returns current UTC time as "HH:MM" rounded down to the nearest 15-min block
+function currentUtcHHMM(): string {
+  const now = new Date();
+  const hh  = String(now.getUTCHours()).padStart(2, '0');
+  const raw = now.getUTCMinutes();
+  const mm  = String(Math.floor(raw / 15) * 15).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -51,10 +61,17 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  const today = todayDDMM();
-  const summary: { sent: number; skipped: number; errors: string[] } = { sent: 0, skipped: 0, errors: [] };
+  // Allow manual override via ?force=true to skip time check
+  const url    = new URL(req.url);
+  const force  = url.searchParams.get('force') === 'true';
+  const nowHHMM = currentUtcHHMM();
+  const today   = todayDDMM();
 
-  // Load all auto_recognition_settings
+  const summary: { sent: number; skipped: number; errors: string[]; time: string } = {
+    sent: 0, skipped: 0, errors: [], time: nowHHMM,
+  };
+
+  // Load all enabled settings
   const { data: settingsList } = await admin
     .from('auto_recognition_settings')
     .select('*')
@@ -67,6 +84,13 @@ Deno.serve(async (req) => {
   }
 
   for (const settings of settingsList) {
+    // Skip companies whose send_time doesn't match current UTC time (unless forced)
+    const compSendTime = settings.send_time || '09:00';
+    if (!force && compSendTime !== nowHHMM) {
+      summary.skipped++;
+      continue;
+    }
+
     const companyId = settings.company_id;
 
     // Get first admin of this company as sender
@@ -101,7 +125,7 @@ Deno.serve(async (req) => {
           p_from_user_id: adminUser.id,
           p_to_user_id:   user.id,
           p_points:       settings.birthday_points || 0,
-          p_program:      settings.birthday_program || '⭐ Actitud',
+          p_program:      settings.birthday_program || '🎂 Cumpleaños',
           p_message:      message,
           p_company_id:   companyId,
         });
@@ -123,7 +147,7 @@ Deno.serve(async (req) => {
       for (const user of (allCompanyUsers || [])) {
         if (!isAnniversaryToday(user.anniversary_date)) continue;
         const years = yearsDiff(user.anniversary_date);
-        if (years < 1) continue; // No enviar el primer día
+        if (years < 1) continue;
         const firstName = user.name.split(' ')[0];
         const message = fillTemplate(settings.anniversary_message, {
           nombre:          firstName,
@@ -136,7 +160,7 @@ Deno.serve(async (req) => {
           p_from_user_id: adminUser.id,
           p_to_user_id:   user.id,
           p_points:       settings.anniversary_points || 0,
-          p_program:      settings.anniversary_program || '🏆 Trabajo en Equipo',
+          p_program:      settings.anniversary_program || '🎉 Aniversario',
           p_message:      message,
           p_company_id:   companyId,
         });

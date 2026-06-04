@@ -22,11 +22,15 @@ function mapProfile(p) {
     points_to_give:    p.points_to_give,
     points_to_redeem:  p.points_to_redeem,
     password_changed:  p.password_changed,
-    birthday:          p.birthday          || null,  // 'DD/MM'
-    anniversary_date:  p.anniversary_date  || null,  // 'YYYY-MM-DD'
-    auto_birthday:     p.auto_birthday     ?? true,
-    auto_anniversary:  p.auto_anniversary  ?? true,
-    user_id:           p.email
+    birthday:                p.birthday                || null,
+    anniversary_date:        p.anniversary_date        || null,
+    auto_birthday:           p.auto_birthday           ?? true,
+    auto_anniversary:        p.auto_anniversary        ?? true,
+    recognition_visibility:  p.recognition_visibility  || 'public',
+    bio:                     p.bio                     || null,
+    interests:               p.interests               || null,
+    work_style:              p.work_style              || null,
+    user_id:                 p.email
   };
 }
 
@@ -114,22 +118,58 @@ window.dataSdk = (function () {
         points_to_redeem: record.points_to_redeem,
         password_changed: record.password_changed,
       };
-      // Include date fields only when explicitly provided
-      if ('birthday'         in record) payload.birthday          = record.birthday || null;
-      if ('anniversary_date' in record) payload.anniversary_date  = record.anniversary_date || null;
-      if ('auto_birthday'    in record) payload.auto_birthday     = record.auto_birthday ?? true;
-      if ('auto_anniversary' in record) payload.auto_anniversary  = record.auto_anniversary ?? true;
+      if ('birthday'                in record) payload.birthday                = record.birthday || null;
+      if ('anniversary_date'        in record) payload.anniversary_date        = record.anniversary_date || null;
+      if ('auto_birthday'           in record) payload.auto_birthday           = record.auto_birthday ?? true;
+      if ('auto_anniversary'        in record) payload.auto_anniversary        = record.auto_anniversary ?? true;
+      if ('recognition_visibility'  in record) payload.recognition_visibility  = record.recognition_visibility || 'public';
+      if ('bio'                     in record) payload.bio                     = record.bio || null;
+      if ('interests'               in record) payload.interests               = record.interests || null;
+      if ('work_style'              in record) payload.work_style              = record.work_style || null;
 
       const { error } = await _sb.from('profiles').update(payload).eq('id', record.__backendId);
       if (error) { _log('update error:', error.message); }
       return { isOk: !error };
     },
 
+    async updatePreferences({ recognition_visibility, auto_birthday, auto_anniversary }) {
+      const { error } = await _sb.rpc('update_user_preferences', {
+        p_recognition_visibility: recognition_visibility ?? 'public',
+        p_auto_birthday:          auto_birthday          ?? true,
+        p_auto_anniversary:       auto_anniversary       ?? true,
+      });
+      if (error) _log('updatePreferences error:', error.message);
+      return { isOk: !error };
+    },
+
+    async updateDates(backendId, birthday, anniversary_date) {
+      const { error } = await _sb.rpc('update_employee_dates', {
+        p_employee_id:    backendId,
+        p_birthday:       birthday         || null,
+        p_anniversary_date: anniversary_date || null,
+      });
+      if (error) _log('updateDates error:', error.message);
+      return { isOk: !error };
+    },
+
+    async preserveUserNames(userId, userName) {
+      await Promise.all([
+        _sb.from('recognitions').update({ from_user_name: userName })
+          .eq('from_user_id', userId).is('from_user_name', null),
+        _sb.from('recognitions').update({ to_user_name: userName })
+          .eq('to_user_id', userId).is('to_user_name', null),
+      ]);
+    },
+
     async delete(record) {
-      const { error } = await _sb.functions.invoke('delete-user', {
+      const { error: fnError } = await _sb.functions.invoke('delete-user', {
         body: { user_id: record.__backendId }
       });
-      if (error) { _log('delete-user error:', error); }
+      if (!fnError) return { isOk: true };
+      // Fallback: si la Edge Function no está desplegada, eliminar solo el perfil
+      _log('delete-user edge fn failed, using fallback:', fnError);
+      const { error } = await _sb.from('profiles').delete().eq('id', record.__backendId);
+      if (error) { _log('delete-user fallback error:', error); }
       return { isOk: !error };
     }
   };
@@ -165,21 +205,16 @@ window.recognitionSdk = {
   },
 
   async list(offset = 0, limit = 10, companyId = null, program = null) {
-    let query = _sb
-      .from('recognitions')
-      .select(`
-        id, points, program, message, created_at, company_id,
-        from_user:profiles!recognitions_from_user_id_fkey(id, name),
-        to_user:profiles!recognitions_to_user_id_fkey(id, name),
-        reactions(emoji, user_id),
-        comments(id, message, created_at, user:profiles!comments_user_id_fkey(id, name))
-      `)
-      .order('created_at', { ascending: false });
-
-    if (companyId) query = query.eq('company_id', companyId);
-    if (program)   query = query.eq('program', program);
-
-    const { data, error } = await query.range(offset, offset + limit - 1);
+    let q = _sb.from('recognitions').select(`
+      id, points, program, message, created_at, company_id,
+      from_user:profiles!recognitions_from_user_id_fkey(id, name),
+      to_user:profiles!recognitions_to_user_id_fkey(id, name),
+      reactions(emoji, user_id),
+      comments(id, message, created_at, user:profiles!comments_user_id_fkey(id, name))
+    `).order('created_at', { ascending: false });
+    if (companyId) q = q.eq('company_id', companyId);
+    if (program)   q = q.eq('program', program);
+    const { data, error } = await q.range(offset, offset + limit - 1);
     if (error) _log('recognitions list error:', error.message);
     return { isOk: !error, data: data || [] };
   },
@@ -188,6 +223,23 @@ window.recognitionSdk = {
     const { error } = await _sb.from('recognitions').delete().eq('id', id);
     if (error) _log('recognition delete error:', error.message);
     return { isOk: !error };
+  },
+
+  async getById(id) {
+    const _run = (withNames) => _sb.from('recognitions').select(`
+      id, points, program, message, created_at, company_id,
+      ${withNames ? 'from_user_name, to_user_name,' : ''}
+      from_user:profiles!recognitions_from_user_id_fkey(id, name),
+      to_user:profiles!recognitions_to_user_id_fkey(id, name),
+      reactions(emoji, user_id),
+      comments(id, message, created_at, user:profiles!comments_user_id_fkey(id, name))
+    `).eq('id', id).single();
+    let { data, error } = await _run(true);
+    if (error && (error.message?.includes('from_user_name') || error.code === '42703')) {
+      ({ data, error } = await _run(false));
+    }
+    if (error) _log('recognition getById error:', error.message);
+    return { isOk: !error, data };
   },
 
   async recentForUser(userId, limit = 6) {
@@ -242,6 +294,12 @@ window.recognitionSdk = {
       .single();
     if (error) _log('addComment error:', error.message);
     return { isOk: !error, data };
+  },
+
+  async deleteComment(commentId) {
+    const { error } = await _sb.from('comments').delete().eq('id', commentId);
+    if (error) _log('deleteComment error:', error.message);
+    return { isOk: !error };
   },
 
   // Fetch feed bypassing RLS — used during impersonation or when RLS blocks company reads
@@ -352,6 +410,25 @@ window.autoRecognitionSdk = {
     });
     if (error) _log('autoRecognition triggerManual error:', error);
     return { isOk: !error, data };
+  },
+};
+
+// ─── Company SDK ─────────────────────────────────────────────────────────────
+window.companySdk = {
+  async list() {
+    const { data, error } = await _sb.from('companies').select('*').order('name');
+    if (error) _log('companies list error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+  async create(id, name, domain) {
+    const { data, error } = await _sb.from('companies').insert({ id, name, domain }).select().single();
+    if (error) _log('companies create error:', error.message);
+    return { isOk: !error, data, error };
+  },
+  async remove(id) {
+    const { error } = await _sb.from('companies').delete().eq('id', id);
+    if (error) _log('companies delete error:', error.message);
+    return { isOk: !error };
   },
 };
 
@@ -892,6 +969,124 @@ window.storageSdk = {
       return { isOk: false };
     }
   }
+};
+
+// ─── CSV Request SDK ──────────────────────────────────────────────────────────
+window.csvRequestSdk = {
+  async submit(companyId, fileName, csvContent, rowCount, requestedById) {
+    try {
+      const { data: { session } } = await _sb.auth.getSession();
+      const userId = requestedById || session?.user?.id;
+      if (!userId) return { isOk: false, error: 'No autenticado' };
+
+      // Insert the request
+      const { data: req, error: insertErr } = await _sb.from('csv_requests').insert({
+        requested_by: userId,
+        company_id:   companyId,
+        file_name:    fileName,
+        csv_content:  csvContent,
+        row_count:    rowCount,
+        status:       'pending',
+      }).select().single();
+
+      if (insertErr) {
+        _log('csvRequest insert error:', insertErr.message);
+        return { isOk: false, error: insertErr.message };
+      }
+
+      // Email al superadmin — awaited, en el SDK donde SUPABASE_URL está en scope
+      try {
+        const token = session?.access_token || SUPABASE_ANON_KEY;
+        const emailRes = await fetch(`${SUPABASE_URL}/functions/v1/notify-csv-request`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ request_id: req.id }),
+        });
+        const emailJson = await emailRes.json().catch(() => ({}));
+        console.log('[Allay] notify-csv-request:', emailRes.status, emailJson);
+      } catch (e) {
+        console.error('[Allay] notify-csv-request error:', e.message);
+      }
+
+      return { isOk: true, data: req };
+    } catch (e) {
+      _log('csvRequest submit exception:', e);
+      return { isOk: false, error: e.message || 'Error de conexión' };
+    }
+  },
+
+  async list() {
+    const { data, error } = await _sb.from('csv_requests')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) _log('csvRequests list error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+
+  async approve(id) {
+    try {
+      const { data: { session } } = await _sb.auth.getSession();
+      const token = session?.access_token || SUPABASE_ANON_KEY;
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/process-csv-request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ request_id: id, action: 'approve' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { _log('approve csv error:', json.error); return { isOk: false, error: json.error }; }
+      return { isOk: true, data: json };
+    } catch (e) {
+      _log('csvRequest approve exception:', e);
+      return { isOk: false, error: e.message };
+    }
+  },
+
+  async reject(id, reason) {
+    try {
+      const { data: { session } } = await _sb.auth.getSession();
+      const reviewerId = session?.user?.id || null;
+
+      // Update status directly (superadmin RLS allows this)
+      const { error } = await _sb.from('csv_requests').update({
+        status: 'rejected',
+        reviewed_at: new Date().toISOString(),
+        reviewed_by: reviewerId,
+        rejection_reason: reason || null,
+      }).eq('id', id);
+
+      if (error) {
+        _log('reject csv error:', error.message);
+        return { isOk: false, error: error.message };
+      }
+
+      // Fetch request to get requested_by + file_name
+      const { data: req } = await _sb.from('csv_requests')
+        .select('requested_by, file_name')
+        .eq('id', id)
+        .single();
+
+      // Notify the requester via the existing send-recognition-notifications function
+      if (req?.requested_by) {
+        const token = session?.access_token || SUPABASE_ANON_KEY;
+        await fetch(`${SUPABASE_URL}/functions/v1/send-recognition-notifications`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({
+            notifications: [{
+              user_id: req.requested_by,
+              type: 'csv_rejected',
+              data: { request_id: id, file_name: req.file_name || 'archivo.csv', rejection_reason: reason || null },
+            }],
+          }),
+        }).catch(e => _log('notify csv_rejected failed (non-critical):', e));
+      }
+
+      return { isOk: true };
+    } catch (e) {
+      _log('csvRequest reject exception:', e);
+      return { isOk: false, error: e.message };
+    }
+  },
 };
 
 // ─── Redemptions SDK ──────────────────────────────────────────────────────────

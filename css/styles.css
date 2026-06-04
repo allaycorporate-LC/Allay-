@@ -1,5 +1,24 @@
 * { font-family: 'Plus Jakarta Sans', sans-serif; }
 
+/* Comment contenteditable — autofill-proof replacement for <input> */
+.comment-editable {
+  outline: none;
+  min-height: 34px;
+  max-height: 80px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.comment-editable:empty::before {
+  content: attr(data-placeholder);
+  color: #9ca3af;
+  pointer-events: none;
+}
+.comment-editable:focus {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 2px #ddd6fe;
+}
+
 /* Los menús de eliminación del feed solo son visibles para superadmin */
 .feed-admin-menu { display: none !important; }
 body.is-superadmin .feed-admin-menu { display: block !important; }

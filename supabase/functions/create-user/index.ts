@@ -30,6 +30,10 @@ Deno.serve(async (req) => {
         role:             body.role,
         points_to_give:   body.points_to_give,
         points_to_redeem: body.points_to_redeem,
+        birthday:         body.birthday         || null,
+        anniversary_date: body.anniversary_date || null,
+        auto_birthday:    body.auto_birthday    ?? true,
+        auto_anniversary: body.auto_anniversary ?? true,
       },
     });
 
@@ -37,6 +41,16 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: error.message }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // Belt-and-suspenders: directly update profile with dates (trigger may not pick them up)
+    if (data.user?.id && (body.birthday || body.anniversary_date)) {
+      await adminClient.from('profiles').update({
+        birthday:         body.birthday         || null,
+        anniversary_date: body.anniversary_date || null,
+        auto_birthday:    body.auto_birthday    ?? true,
+        auto_anniversary: body.auto_anniversary ?? true,
+      }).eq('id', data.user.id);
     }
 
     return new Response(JSON.stringify({ user: data.user }), {

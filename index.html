@@ -53,7 +53,7 @@
     }
   </script>
 
-  <script src="_sdk/data_sdk.js?v=34" type="text/javascript"></script>
+  <script src="_sdk/data_sdk.js?v=39" type="text/javascript"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
@@ -77,7 +77,6 @@
     <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-8 space-y-6">
       <div>
         <h2 class="text-2xl font-bold text-gray-800">Inicia sesión</h2>
-        <p class="text-sm text-gray-500 mt-1">Con tu email corporativo</p>
       </div>
 
       <form id="login-form" class="space-y-4" onsubmit="handleLogin(event)">
@@ -159,11 +158,17 @@
       </div>
 
       <!-- Search -->
-      <div class="flex-1 max-w-md mx-4">
+      <div class="flex-1 max-w-md mx-4 relative" id="global-search-wrap">
         <div class="relative">
           <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
-          <input type="text" placeholder="Buscar personas, equipos..."
+          <input id="global-search-input" type="text" placeholder="Buscar personas, programas..."
+            autocomplete="off" readonly
+            onfocus="this.removeAttribute('readonly')"
+            oninput="onGlobalSearch(this.value)"
             class="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 transition">
+        </div>
+        <div id="global-search-results"
+          class="hidden absolute left-0 right-0 top-11 bg-white border border-gray-100 rounded-2xl shadow-xl z-50 overflow-hidden max-h-80 overflow-y-auto">
         </div>
       </div>
 
@@ -231,12 +236,12 @@
           <!-- Dropdown -->
           <div id="profile-dropdown" class="hidden absolute right-0 top-12 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50">
             <div class="px-4 py-2 border-b border-gray-100">
-              <p id="profile-name" class="font-semibold text-sm text-gray-800">María González</p>
-              <p id="profile-email" class="text-xs text-gray-500">maria@empresa.com</p>
+              <p id="profile-name" class="font-semibold text-sm text-gray-800"></p>
+              <p id="profile-email" class="text-xs text-gray-500"></p>
             </div>
             <button class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-violet-50 text-sm text-gray-700 transition"
               onclick="openUserProfilePage(); document.getElementById('profile-dropdown').classList.add('hidden');">
-              <i data-lucide="circle-user" class="w-4 h-4 text-violet-500"></i> Ir al perfil
+              <i data-lucide="user-circle" class="w-4 h-4 text-violet-500"></i> Ir al perfil
             </button>
             <button class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-violet-50 text-sm text-gray-700 transition"
               onclick="openProfilePage(); document.getElementById('profile-dropdown').classList.add('hidden');">
@@ -352,7 +357,7 @@
           <!-- Left: texto bienvenida + botón reconocer -->
           <div class="flex flex-col gap-4">
             <div>
-              <p id="welcome-text" class="text-2xl font-extrabold text-gray-900">¡Hola, María! 👋</p>
+              <p id="welcome-text" class="text-2xl font-extrabold text-gray-900"></p>
               <p class="text-sm text-gray-400 mt-1.5">Lo bueno se potencia cuando se comparte.</p>
             </div>
             <button onclick="openModal()" class="btn-recognize self-start py-2 px-5 rounded-xl text-white font-bold text-sm shadow-md hover:shadow-lg transition flex items-center gap-2">
@@ -773,7 +778,7 @@
       </div>
 
       <!-- Empleados -->
-      <div>
+      <div id="np-emp-section">
         <label class="block text-sm font-semibold text-gray-700 mb-1.5">Empleados que pueden reconocer</label>
         <div class="relative mb-2">
           <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
@@ -810,6 +815,46 @@
     <!-- Feed -->
     <div id="history-feed" class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
       <!-- Renderizado dinámicamente -->
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     RECOGNITION DETAIL MODAL
+══════════════════════════════════════ -->
+<div id="recognition-detail-modal" class="hidden fixed inset-0 z-[490] flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="closeRecognitionModal()"></div>
+  <div class="relative w-full max-w-lg max-h-[90vh] overflow-y-auto">
+    <button onclick="closeRecognitionModal()" class="absolute top-3 right-3 z-10 p-2 rounded-full bg-white/80 hover:bg-white shadow-md transition text-gray-500 hover:text-gray-800">
+      <i data-lucide="x" class="w-4 h-4"></i>
+    </button>
+    <div id="recognition-detail-content">
+      <div class="bg-white rounded-2xl p-8 flex items-center justify-center">
+        <i data-lucide="loader-2" class="w-6 h-6 text-violet-400 animate-spin"></i>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     DELETE EMPLOYEE CONFIRM MODAL
+══════════════════════════════════════ -->
+<div id="delete-employee-modal" class="hidden fixed inset-0 z-[500] flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeDeleteEmployeeModal()"></div>
+  <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+        <i data-lucide="user-x" class="w-5 h-5 text-red-500"></i>
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-gray-800">Eliminar usuario</h3>
+        <p class="text-xs text-gray-500 mt-0.5">Esta acción es <strong>irreversible</strong></p>
+      </div>
+    </div>
+    <p class="text-sm text-gray-600">¿Estás seguro que querés eliminar a <strong id="delete-employee-name" class="text-gray-800"></strong>? Se borrarán su cuenta y todos sus datos de la plataforma.</p>
+    <div class="flex gap-3 pt-1">
+      <button onclick="closeDeleteEmployeeModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
+      <button id="delete-employee-confirm-btn" onclick="confirmDeleteEmployee()" class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition">Eliminar</button>
     </div>
   </div>
 </div>
@@ -930,6 +975,7 @@
             class="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
             oninput="filterPeople(this.value)">
         </div>
+        <p class="text-xs text-gray-400 flex items-center gap-1"><i data-lucide="info" class="w-3 h-3 shrink-0"></i> Podés buscar y seleccionar uno o varios empleados para enviar el reconocimiento.</p>
         <!-- Selected recipients tags -->
         <div id="selected-recipients-bar" class="hidden flex flex-wrap gap-1.5 px-3 py-2 bg-violet-50 rounded-xl border border-violet-100 min-h-[2.25rem] items-center"></div>
         <div id="people-list" class="space-y-2"></div>
@@ -1058,6 +1104,12 @@
             </div>
             <p id="points-warning" class="text-xs text-red-500 mt-1 hidden">No tenés suficientes puntos</p>
           </div>
+        </div>
+
+        <!-- Preferencias de privacidad de destinatarios -->
+        <div id="privacy-pref-hint" class="hidden flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-700">
+          <i data-lucide="info" class="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500"></i>
+          <span id="privacy-pref-hint-text"></span>
         </div>
 
         <!-- Privacidad -->
@@ -1202,18 +1254,40 @@
       </div>
     </div>
   </nav>
+  <!-- Admin quick-nav -->
+  <div id="admin-quicknav" class="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100 px-4 md:px-6 py-2.5 flex gap-2 overflow-x-auto scrollbar-hide">
+    <button onclick="adminScrollTo('admin-section-upload')" class="admin-qnav-btn shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
+      <i data-lucide="upload" class="w-3.5 h-3.5"></i> Cargar CSV
+    </button>
+    <button id="qnav-my-requests" onclick="adminScrollTo('admin-csv-history-section')" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
+      <i data-lucide="clock" class="w-3.5 h-3.5"></i> Mis solicitudes
+    </button>
+    <button id="qnav-companies" onclick="adminScrollTo('superadmin-companies-section')" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
+      <i data-lucide="building-2" class="w-3.5 h-3.5"></i> Empresas
+    </button>
+    <button id="qnav-csv-requests" onclick="adminScrollTo('superadmin-csv-requests-section')" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
+      <i data-lucide="file-check-2" class="w-3.5 h-3.5"></i> Solicitudes CSV
+    </button>
+    <button onclick="adminScrollTo('admin-section-employees')" class="admin-qnav-btn shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
+      <i data-lucide="users" class="w-3.5 h-3.5"></i> Empleados
+    </button>
+    <button onclick="adminScrollTo('admin-section-ar')" class="admin-qnav-btn shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
+      <i data-lucide="calendar-heart" class="w-3.5 h-3.5"></i> Reconocimientos automáticos
+    </button>
+  </div>
+
   <main class="flex-1 px-4 md:px-6 py-6 md:py-8 overflow-y-auto">
     <div class="max-w-4xl mx-auto space-y-6 pb-20">
 
       <!-- CSV Upload -->
-      <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+      <div id="admin-section-upload" class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
         <div class="flex items-center gap-2 mb-5"><i data-lucide="upload" class="w-5 h-5 text-violet-500"></i><h2 class="text-lg font-bold text-gray-800">Cargar base de datos</h2></div>
-        <p class="text-sm text-gray-600 mb-4">Sube un archivo CSV con columnas: nombre, email, departamento, empresa (company_id), puntos_para_dar, puntos_para_canjear</p>
+        <p class="text-sm text-gray-600 mb-4">Sube un archivo CSV con columnas: nombre, email, departamento, empresa (company_id), puntos_para_dar, puntos_para_canjear, cumpleaños (DD/MM), aniversario (YYYY-MM-DD)</p>
         <div class="border-2 border-dashed border-violet-300 rounded-xl p-8 text-center hover:border-violet-500 hover:bg-violet-50 transition cursor-pointer bg-violet-50/30" onclick="document.getElementById('csv-file-input').click()">
           <i data-lucide="file-up" class="w-12 h-12 mx-auto text-violet-400 mb-3"></i>
           <p class="text-sm font-semibold text-gray-700">Haz clic para seleccionar un archivo CSV</p>
           <p class="text-xs text-gray-500 mt-1">o arrastra y suelta aquí</p>
-          <input type="file" id="csv-file-input" accept=".csv" class="hidden" onchange="handleFileUpload(this)">
+          <input type="file" id="csv-file-input" accept=".csv" class="hidden" onchange="handleFileSelect(this)">
         </div>
         <div class="mt-4">
           <button id="upload-btn" class="btn-recognize text-white px-6 py-2.5 rounded-full text-sm font-semibold shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-2" onclick="uploadEmployees()" disabled>
@@ -1222,8 +1296,92 @@
         </div>
       </div>
 
+      <!-- CSV Request History (admin only) -->
+      <div id="admin-csv-history-section" class="hidden bg-white rounded-2xl border border-gray-100 shadow-sm">
+        <button onclick="toggleAdminCsvHistory()" class="w-full flex items-center justify-between p-6 text-left">
+          <div class="flex items-center gap-2">
+            <i data-lucide="clock" class="w-5 h-5 text-violet-500"></i>
+            <h2 class="text-lg font-bold text-gray-800">Mis solicitudes CSV</h2>
+            <span id="admin-csv-history-badge" class="hidden ml-1 bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full"></span>
+          </div>
+          <i id="admin-csv-history-chevron" data-lucide="chevron-down" class="w-5 h-5 text-gray-400 transition-transform duration-200"></i>
+        </button>
+        <div id="admin-csv-history-body" class="hidden px-6 pb-6">
+          <div id="admin-csv-history-list" class="space-y-3">
+            <p class="text-center py-6 text-gray-400 text-sm">Cargando...</p>
+          </div>
+          <div id="admin-csv-history-pagination" class="hidden flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+            <button onclick="adminCsvHistoryPage(-1)" class="flex items-center gap-1 text-sm font-semibold text-gray-500 hover:text-violet-600 disabled:opacity-30 transition" id="admin-csv-prev">
+              <i data-lucide="chevron-left" class="w-4 h-4"></i> Anterior
+            </button>
+            <span id="admin-csv-page-info" class="text-xs text-gray-400"></span>
+            <button onclick="adminCsvHistoryPage(1)" class="flex items-center gap-1 text-sm font-semibold text-gray-500 hover:text-violet-600 disabled:opacity-30 transition" id="admin-csv-next">
+              Siguiente <i data-lucide="chevron-right" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Companies management (superadmin only) -->
+      <div id="superadmin-companies-section" class="hidden bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+        <div class="flex items-center justify-between mb-5">
+          <div class="flex items-center gap-2"><i data-lucide="building-2" class="w-5 h-5 text-violet-500"></i><h2 class="text-lg font-bold text-gray-800">Empresas</h2></div>
+          <button onclick="toggleCreateCompanyForm()" class="flex items-center gap-1.5 text-sm font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-full transition">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i> Nueva empresa
+          </button>
+        </div>
+
+        <div class="relative mb-4">
+          <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+          <input id="company-search" type="text" placeholder="Buscar por nombre, ID o dominio..." oninput="filterCompaniesSearch()" class="w-full pl-9 pr-4 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-300 bg-gray-50">
+        </div>
+
+        <div id="create-company-form" class="hidden mb-5 p-4 bg-violet-50 rounded-xl border border-violet-100 space-y-3">
+          <p class="text-xs font-bold text-gray-700 uppercase tracking-wide">Nueva empresa</p>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label class="block text-xs font-semibold text-gray-600 mb-1">Nombre</label>
+              <input id="new-company-name" type="text" placeholder="Ej: Acme Corp" oninput="autoFillCompanyId()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-600 mb-1">Dominio de email</label>
+              <input id="new-company-domain" type="text" placeholder="@acmecorp.com" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-600 mb-1">ID (auto-generado, editable)</label>
+              <input id="new-company-id" type="text" placeholder="comp-acme-corp" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white font-mono">
+            </div>
+          </div>
+          <div class="flex gap-2 pt-1">
+            <button onclick="toggleCreateCompanyForm()" class="px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition">Cancelar</button>
+            <button id="create-company-btn" onclick="submitCreateCompany()" class="px-4 py-2 text-sm font-semibold text-white bg-violet-500 hover:bg-violet-600 rounded-xl transition disabled:opacity-50">Crear empresa</button>
+          </div>
+        </div>
+
+        <div id="companies-list" class="space-y-2">
+          <p class="text-center py-6 text-gray-400 text-sm">Cargando...</p>
+        </div>
+      </div>
+
+      <!-- CSV Requests (superadmin only) -->
+      <div id="superadmin-csv-requests-section" class="hidden bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+        <div class="flex items-center gap-2 mb-5">
+          <i data-lucide="file-check-2" class="w-5 h-5 text-violet-500"></i>
+          <h2 class="text-lg font-bold text-gray-800">Solicitudes CSV</h2>
+          <span id="csv-requests-badge" class="hidden ml-1 bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full"></span>
+        </div>
+        <div class="flex gap-1 mb-4 bg-gray-100 p-1 rounded-xl w-fit">
+          <button id="csv-tab-pending"  onclick="setCsvRequestTab('pending')"  class="px-4 py-1.5 text-sm font-semibold rounded-lg transition bg-white text-violet-600 shadow-sm">Pendientes</button>
+          <button id="csv-tab-approved" onclick="setCsvRequestTab('approved')" class="px-4 py-1.5 text-sm font-semibold rounded-lg transition text-gray-500 hover:bg-gray-200">Aprobados</button>
+          <button id="csv-tab-rejected" onclick="setCsvRequestTab('rejected')" class="px-4 py-1.5 text-sm font-semibold rounded-lg transition text-gray-500 hover:bg-gray-200">Rechazados</button>
+        </div>
+        <div id="csv-requests-list" class="space-y-3">
+          <p class="text-center py-6 text-gray-400 text-sm">Cargando...</p>
+        </div>
+      </div>
+
       <!-- Employees table -->
-      <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+      <div id="admin-section-employees" class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-2"><i data-lucide="users" class="w-5 h-5 text-violet-500"></i><h2 class="text-lg font-bold text-gray-800">Empleados en la base de datos</h2></div>
           <span id="employee-count" class="text-sm font-semibold text-violet-600 bg-violet-50 px-3 py-1 rounded-full">0 empleados</span>
@@ -1275,9 +1433,6 @@
         </div>
 
         <div class="flex gap-3 mt-6">
-          <button onclick="clearAllEmployees()" class="flex-1 px-6 py-3 rounded-xl border-2 border-red-200 text-red-700 font-semibold hover:bg-red-50 hover:border-red-300 transition flex items-center justify-center gap-2">
-            <i data-lucide="trash-2" class="w-4 h-4"></i> Limpiar todo
-          </button>
           <button onclick="closeAdminPage()" class="flex-1 px-6 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 transition flex items-center justify-center gap-2">
             <i data-lucide="x" class="w-4 h-4"></i> Cerrar
           </button>
@@ -1286,19 +1441,20 @@
     </div>
 
     <!-- ── Reconocimientos automáticos ──────────────────────────────────── -->
-    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+    <div id="admin-section-ar" class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
       <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-xl bg-[#fff0f6] flex items-center justify-center">
+        <button onclick="toggleArSection()" class="flex items-center gap-3 text-left flex-1 min-w-0">
+          <div class="w-9 h-9 rounded-xl bg-[#fff0f6] flex items-center justify-center shrink-0">
             <i data-lucide="calendar-heart" class="w-5 h-5 text-[#f19ac4]"></i>
           </div>
-          <div>
+          <div class="min-w-0">
             <h2 class="text-base font-bold text-gray-800">Reconocimientos automáticos</h2>
             <p class="text-xs text-gray-400">Cumpleaños y aniversarios del equipo</p>
           </div>
-        </div>
+          <i id="ar-chevron" data-lucide="chevron-down" class="w-5 h-5 text-gray-400 transition-transform duration-200 shrink-0 ml-1"></i>
+        </button>
         <!-- Master toggle -->
-        <label class="relative inline-flex items-center cursor-pointer">
+        <label class="relative inline-flex items-center cursor-pointer ml-3" onclick="event.stopPropagation()">
           <input type="checkbox" id="ar-enabled" class="sr-only peer">
           <div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-[#3d2b56]
             after:content-[''] after:absolute after:top-[2px] after:left-[2px]
@@ -1307,7 +1463,7 @@
         </label>
       </div>
 
-      <div id="ar-body" class="p-6 space-y-5">
+      <div id="ar-body" class="hidden p-6 space-y-5">
 
         <!-- Dos columnas: Cumpleaños | Aniversario -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1334,8 +1490,10 @@
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block text-xs font-semibold text-gray-500 mb-1">Programa</label>
-                <select id="ar-birthday-program"
-                  class="w-full text-sm bg-white border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"></select>
+                <div class="flex items-center gap-1.5 px-3 py-2 bg-violet-50 border border-violet-100 rounded-lg">
+                  <i data-lucide="lock" class="w-3 h-3 text-violet-400 shrink-0"></i>
+                  <span class="text-sm font-semibold text-violet-700">🎂 Cumpleaños</span>
+                </div>
               </div>
               <div>
                 <label class="block text-xs font-semibold text-gray-500 mb-1">Puntos</label>
@@ -1367,8 +1525,10 @@
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block text-xs font-semibold text-gray-500 mb-1">Programa</label>
-                <select id="ar-anniversary-program"
-                  class="w-full text-sm bg-white border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"></select>
+                <div class="flex items-center gap-1.5 px-3 py-2 bg-violet-50 border border-violet-100 rounded-lg">
+                  <i data-lucide="lock" class="w-3 h-3 text-violet-400 shrink-0"></i>
+                  <span class="text-sm font-semibold text-violet-700">🎉 Aniversario</span>
+                </div>
               </div>
               <div>
                 <label class="block text-xs font-semibold text-gray-500 mb-1">Puntos</label>
@@ -1386,31 +1546,46 @@
             <i data-lucide="clock" class="w-4 h-4 text-[#3d2b56]"></i>
           </div>
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-semibold text-gray-700">Horario de envío</p>
-            <p class="text-xs text-gray-400 mt-0.5">Los reconocimientos se enviarán todos los días a esta hora</p>
+            <p class="text-sm font-semibold text-gray-700">Horario de envío <span class="text-[10px] font-medium text-gray-400 ml-1">UTC</span></p>
+            <p class="text-xs text-gray-400 mt-0.5">Los reconocimientos se enviarán todos los días a esta hora (UTC). Argentina = UTC−3.</p>
           </div>
-          <input type="time" id="ar-send-time" value="09:00"
-            class="text-sm font-semibold bg-white border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 text-[#3d2b56] shrink-0">
+          <div class="flex items-center gap-1 shrink-0">
+            <select id="ar-send-hour"
+              class="text-sm font-semibold bg-white border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 text-[#3d2b56]">
+              <!-- options injected by JS -->
+            </select>
+            <span class="text-gray-400 font-bold">:</span>
+            <select id="ar-send-minute"
+              class="text-sm font-semibold bg-white border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 text-[#3d2b56]">
+              <option value="00">00</option>
+              <option value="15">15</option>
+              <option value="30">30</option>
+              <option value="45">45</option>
+            </select>
+          </div>
         </div>
 
-                <!-- Próximos 30 días -->
+        <!-- Calendario por mes -->
         <div>
-          <h3 class="text-sm font-bold text-gray-700 flex items-center gap-2 mb-3">
-            <i data-lucide="calendar-clock" class="w-4 h-4 text-[#3d2b56]"></i> Próximos 30 días
-            <span id="ar-upcoming-count" class="text-xs bg-violet-100 text-[#3d2b56] px-2 py-0.5 rounded-full font-bold">0</span>
-          </h3>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-bold text-gray-700 flex items-center gap-2">
+              <i data-lucide="calendar-clock" class="w-4 h-4 text-[#3d2b56]"></i>
+              Resumen del mes
+              <span id="ar-upcoming-count" class="text-xs bg-violet-100 text-[#3d2b56] px-2 py-0.5 rounded-full font-bold">0</span>
+            </h3>
+            <div class="flex items-center gap-1">
+              <button onclick="_arPrevMonth()" class="p-1.5 rounded-lg hover:bg-gray-100 transition" title="Mes anterior">
+                <i data-lucide="chevron-left" class="w-4 h-4 text-gray-500"></i>
+              </button>
+              <span id="ar-month-label" class="text-xs font-semibold text-[#3d2b56] min-w-[130px] text-center"></span>
+              <button onclick="_arNextMonth()" class="p-1.5 rounded-lg hover:bg-gray-100 transition" title="Mes siguiente">
+                <i data-lucide="chevron-right" class="w-4 h-4 text-gray-500"></i>
+              </button>
+            </div>
+          </div>
           <div id="ar-upcoming-list" class="space-y-2">
             <p class="text-xs text-gray-400 italic">Sin fechas próximas registradas.</p>
           </div>
-        </div>
-
-        <!-- Empleados con fechas configuradas -->
-        <div>
-          <h3 class="text-sm font-bold text-gray-700 flex items-center gap-2 mb-3">
-            <i data-lucide="users" class="w-4 h-4 text-gray-400"></i> Empleados con fechas configuradas
-            <span id="ar-employees-count" class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold">0</span>
-          </h3>
-          <div id="ar-employees-list" class="space-y-1.5"></div>
         </div>
 
         <!-- Footer: guardar + test -->
@@ -1419,15 +1594,7 @@
             class="w-full py-3 bg-[#3d2b56] text-white text-sm font-bold rounded-xl hover:bg-violet-900 transition flex items-center justify-center gap-2">
             <i data-lucide="save" class="w-4 h-4"></i> Guardar configuración
           </button>
-          <div class="flex items-center justify-between">
-            <p id="ar-saved-msg" class="text-xs text-green-600 font-semibold hidden flex items-center gap-1">
-              <i data-lucide="check-circle" class="w-3.5 h-3.5"></i> Cambios guardados correctamente
-            </p>
-            <button onclick="triggerAutoRecognitionsNow()"
-              class="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition">
-              <i data-lucide="play" class="w-3.5 h-3.5"></i> Probar envío de hoy
-            </button>
-          </div>
+          <p id="ar-saved-msg" class="text-xs font-semibold hidden"></p>
         </div>
 
       </div>
@@ -1602,29 +1769,32 @@
         <h3 class="text-sm font-bold text-gray-700 mb-1 flex items-center gap-2">
           <i data-lucide="cake" class="w-4 h-4 text-[#f19ac4]"></i> Fechas importantes
         </h3>
-        <p class="text-xs text-gray-400 mb-4">El equipo te celebrará automáticamente en estas fechas si la empresa tiene los reconocimientos automáticos activos.</p>
-
         <!-- Cumpleaños -->
         <div class="py-3 border-b border-gray-100">
-          <label class="block text-sm font-medium text-gray-800 mb-1.5">Cumpleaños</label>
+          <label class="block text-sm font-medium text-gray-500 mb-1.5 flex items-center gap-1.5">
+            Cumpleaños
+            <span class="text-[10px] font-normal text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Solo lectura</span>
+          </label>
           <div class="flex items-center gap-2">
-            <input type="text" id="up-birthday" maxlength="5" placeholder="DD/MM"
-              onblur="saveDates()" oninput="formatBirthdayInput(this)"
-              class="w-28 text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 text-center tracking-widest">
-            <span class="text-xs text-gray-400">día / mes — ej: 15/03</span>
+            <input type="text" id="up-birthday" maxlength="5" placeholder="—"
+              disabled
+              class="w-28 text-sm bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-center tracking-widest text-gray-500 cursor-not-allowed">
+            <span class="text-xs text-gray-400">DD/MM</span>
           </div>
         </div>
 
         <!-- Aniversario -->
         <div class="pt-3">
-          <label class="block text-sm font-medium text-gray-800 mb-1.5">Fecha de ingreso a la empresa</label>
+          <label class="block text-sm font-medium text-gray-500 mb-1.5 flex items-center gap-1.5">
+            Fecha de ingreso a la empresa
+            <span class="text-[10px] font-normal text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Solo lectura</span>
+          </label>
           <div class="flex items-center gap-2">
-            <input type="date" id="up-anniversary" onblur="saveDates()"
-              class="text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300">
+            <input type="date" id="up-anniversary" disabled
+              class="text-sm bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-gray-500 cursor-not-allowed">
             <span class="text-xs text-gray-400">aniversario laboral</span>
           </div>
         </div>
-        <p id="up-dates-saved" class="hidden text-[10px] text-green-500 font-semibold text-right mt-2">Guardado en tu perfil</p>
       </div>
 
       <!-- Preferencias de reconocimiento -->
@@ -1637,7 +1807,7 @@
         <div class="flex items-start justify-between gap-4 py-3 border-b border-gray-100">
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium text-gray-800">¿Cómo preferís recibir reconocimientos?</p>
-            <p class="text-xs text-gray-400 mt-0.5">Público: aparece en el feed. Privado: solo vos y quien lo envió.</p>
+            <p class="text-xs text-gray-400 mt-0.5">Público: aparece en el feed. Privado: solo vos y quien lo envió. Los administradores de tu empresa siempre pueden ver los reconocimientos privados.</p>
           </div>
           <div class="flex gap-1 bg-gray-100 rounded-xl p-1 shrink-0">
             <button id="pref-vis-public"  onclick="setRecognitionPref('visibility','public')"
@@ -1654,8 +1824,8 @@
         <!-- Cumpleaños y aniversarios -->
         <div class="flex items-start justify-between gap-4 pt-3">
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-gray-800">Reconocimientos de cumpleaños y aniversarios</p>
-            <p class="text-xs text-gray-400 mt-0.5">¿Querés que el equipo pueda reconocerte en estas fechas?</p>
+            <p class="text-sm font-medium text-gray-800">Reconocimientos automáticos</p>
+            <p class="text-xs text-gray-400 mt-0.5">¿Querés recibir reconocimientos en tu cumpleaños y aniversario laboral?</p>
           </div>
           <div class="flex gap-1 bg-gray-100 rounded-xl p-1 shrink-0">
             <button id="pref-bday-yes" onclick="setRecognitionPref('birthday','yes')"
@@ -1669,9 +1839,18 @@
           </div>
         </div>
 
-      </div>
+        <!-- Guardar preferencias -->
+        <div class="flex items-center justify-between pt-4 mt-1 border-t border-gray-100">
+          <span id="pref-saved-msg" class="text-xs font-semibold text-green-600 hidden flex items-center gap-1">
+            <i data-lucide="check-circle" class="w-3.5 h-3.5"></i> Preferencias guardadas
+          </span>
+          <span id="pref-error-msg" class="text-xs font-semibold text-red-500 hidden">Error al guardar, intentá de nuevo.</span>
+          <button onclick="saveRecognitionPrefs()" class="ml-auto px-4 py-2 bg-[#3d2b56] text-white text-xs font-semibold rounded-xl hover:bg-[#2e1f42] transition">
+            Guardar preferencias
+          </button>
+        </div>
 
-      <p class="text-[10px] text-gray-300 text-center pb-2">Los cambios se guardan automáticamente en este dispositivo.</p>
+      </div>
 
     </div>
 
@@ -2616,6 +2795,52 @@
   </div>
 </div>
 
+<!-- ══ CSV Preview Modal ══ -->
+<div id="csv-preview-modal" class="hidden fixed inset-0 z-[620] flex items-center justify-center p-4">
+  <div class="modal-backdrop absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeCsvPreviewModal()"></div>
+  <div class="modal-content relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh]">
+    <div class="flex items-center justify-between p-5 border-b border-gray-100 shrink-0">
+      <div>
+        <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <i data-lucide="table-2" class="w-5 h-5 text-violet-500"></i> Vista previa del CSV
+        </h2>
+        <p id="csv-preview-subtitle" class="text-xs text-gray-500 mt-0.5"></p>
+      </div>
+      <button onclick="closeCsvPreviewModal()" class="p-2 rounded-full hover:bg-gray-100 transition">
+        <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+      </button>
+    </div>
+    <div class="flex-1 overflow-auto p-5">
+      <div id="csv-preview-table-container"></div>
+    </div>
+    <div id="csv-preview-actions" class="p-5 border-t border-gray-100 flex gap-3 shrink-0">
+      <button onclick="closeCsvPreviewModal()" class="px-5 py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition">Cerrar</button>
+      <button id="csv-preview-approve-btn" class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm transition">
+        <i data-lucide="check" class="w-4 h-4"></i> Aprobar
+      </button>
+      <button id="csv-preview-reject-btn" class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-semibold text-sm transition">
+        <i data-lucide="x" class="w-4 h-4"></i> Rechazar
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Reject CSV Modal ══ -->
+<div id="reject-csv-modal" class="hidden fixed inset-0 z-[630] flex items-center justify-center p-4">
+  <div class="modal-backdrop absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeRejectCsvModal()"></div>
+  <div class="modal-content relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+    <h3 class="text-lg font-bold text-gray-800 mb-1 flex items-center gap-2">
+      <i data-lucide="file-x" class="w-5 h-5 text-red-500"></i> Rechazar solicitud CSV
+    </h3>
+    <p class="text-sm text-gray-500 mb-4">El administrador recibirá una notificación. Podés agregar un motivo opcional.</p>
+    <textarea id="reject-reason-input" class="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-300 resize-none" rows="3" placeholder="Motivo del rechazo (opcional)..."></textarea>
+    <div class="flex gap-3 mt-4">
+      <button onclick="closeRejectCsvModal()" class="flex-1 px-4 py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition">Cancelar</button>
+      <button onclick="confirmRejectCsvRequest()" class="flex-1 px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white font-semibold text-sm rounded-xl transition">Confirmar rechazo</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════════════════════════════
      GESTIÓN DE PUNTOS PAGE
 ══════════════════════════════════════ -->
@@ -2780,7 +3005,7 @@
   </div>
 </div>
 
-<script src="js/app.js?v=111"></script>
+<script src="js/app.js?v=126"></script>
 <script src="js/analytics.js?v=1"></script>
 </body>
 </html>

@@ -130,6 +130,10 @@ let selectedProgram = null;
 let currentPage = 'home';
 let employees = [];
 let selectedFile = null;
+let _csvRequestsData = [];
+let _csvPreviewRequestId = null;
+let _csvRequestTab = 'pending';
+let _pendingRejectId = null;
 let currentUser = null;
 let _companyMemberIds = null; // pre-computed Set, rebuilt only when allUsers changes
 let originalSuperadminUser = null;
@@ -153,10 +157,10 @@ function esc(str) {
 
 let notificationsList = [
   { id: 1, type: 'recognition',      name: 'Carlos Ruiz',         action: 'reaccionó a tu reconocimiento',  emoji: '❤️', time: '2 horas',  read: false },
-  { id: 2, type: 'comment',          name: 'Ana López',            action: 'comentó en tu reconocimiento',   message: '¡Totalmente merecido! María es increíble �xS', time: '2 horas',  read: false },
+  { id: 2, type: 'comment',          name: 'Ana López',            action: 'comentó en tu reconocimiento',   message: '¡Totalmente merecido! María es increíble 😊', time: '2 horas',  read: false },
   { id: 3, type: 'reaction_multiple',name: 'Diego Torres y otros', action: 'reaccionaron ❤️ a tu reconocimiento', time: '3 horas',  read: true  },
   { id: 4, type: 'recognition',      name: 'Lucas Méndez',         action: 'te reconoció',                   emoji: '⭐', time: '5 horas',  read: true  },
-  { id: 5, type: 'milestone',        name: 'Sistema',              action: 'Alcanzaste 500 puntos acumulados', emoji: '�x}0', time: '1 día',   read: true  }
+  { id: 5, type: 'milestone',        name: 'Sistema',              action: 'Alcanzaste 500 puntos acumulados', emoji: '🏆', time: '1 día',   read: true  }
 ];
 
 let companies = [
@@ -341,7 +345,7 @@ function validatePasswordRequirements() {
     if (!el) return;
     el.classList.toggle('text-gray-300', !ok);
     el.classList.toggle('text-green-500', ok);
-    el.textContent = ok ? '�S' : '�9';
+    el.textContent = ok ? '✓' : '✕';
   });
 
   saveBtn.disabled = !checks.every(c => c.ok);
@@ -492,6 +496,14 @@ async function initDataSDK() {
 initDataSDK();
 
 
+const PAGE_SIZE = 7;
+let _empPage = 0;
+
+function filterEmployeesSearch() {
+  _empPage = 0;
+  renderEmployeesList();
+}
+
 function renderEmployeesList() {
   const container = document.getElementById('employees-container');
   const countEl   = document.getElementById('employee-count');
@@ -519,16 +531,21 @@ function renderEmployeesList() {
     return co !== 0 ? co : (a.name || '').localeCompare(b.name || '', 'es');
   });
 
-  countEl.textContent = `${displayEmployees.length} ${displayEmployees.length === 1 ? 'empleado' : 'empleados'}`;
+  const total = displayEmployees.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (_empPage >= totalPages) _empPage = totalPages - 1;
+  const paged = displayEmployees.slice(_empPage * PAGE_SIZE, (_empPage + 1) * PAGE_SIZE);
 
-  if (displayEmployees.length === 0) {
+  countEl.textContent = `${total} ${total === 1 ? 'empleado' : 'empleados'}`;
+
+  if (total === 0) {
     container.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">No hay empleados cargados. Sube un archivo CSV para comenzar.</p>';
     return;
   }
 
   const canManage = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
 
-  container.innerHTML = displayEmployees.map(emp => `
+  const rows = paged.map(emp => `
     <div data-emp-id="${esc(emp.__backendId)}" class="p-4 rounded-xl border border-gray-200 hover:border-violet-300 hover:bg-violet-50/30 transition flex items-center justify-between">
       <div class="flex-1">
         <div class="flex items-center gap-2">
@@ -568,26 +585,64 @@ function renderEmployeesList() {
     </div>
   `).join('');
 
+  const pagination = totalPages > 1 ? `
+    <div class="flex items-center justify-between pt-3 border-t border-gray-100 mt-2">
+      <button onclick="_empPage--;renderEmployeesList()" ${_empPage === 0 ? 'disabled' : ''} class="flex items-center gap-1 px-3 py-1.5 text-sm font-semibold rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition">
+        <i data-lucide="chevron-left" class="w-4 h-4"></i> Anterior
+      </button>
+      <span class="text-xs text-gray-500">Página ${_empPage + 1} de ${totalPages}</span>
+      <button onclick="_empPage++;renderEmployeesList()" ${_empPage >= totalPages - 1 ? 'disabled' : ''} class="flex items-center gap-1 px-3 py-1.5 text-sm font-semibold rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition">
+        Siguiente <i data-lucide="chevron-right" class="w-4 h-4"></i>
+      </button>
+    </div>` : '';
+
+  container.innerHTML = rows + pagination;
   renderPeopleList();
   lucide.createIcons();
 }
 
 function renderPeopleList() {
   const container = document.getElementById('people-list');
-  if (!container || !currentUser) {
-    if (container) container.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">No hay empleados disponibles</p>';
+  if (!container) return;
+  container.innerHTML = '';
+}
+
+function _renderPeopleResults(q) {
+  const container = document.getElementById('people-list');
+  if (!container || !currentUser) return;
+
+  q = (q || '').toLowerCase().trim();
+
+  // With no query, keep list empty
+  if (!q) {
+    container.innerHTML = '';
+    const emptyMsg = document.getElementById('people-empty-msg');
+    if (emptyMsg) emptyMsg.classList.add('hidden');
     return;
   }
 
   const available = allUsers.filter(emp =>
     (currentUser.role === 'superadmin' || emp.company_id === currentUser.company_id) &&
-    emp.email !== currentUser.email
+    emp.email !== currentUser.email &&
+    emp.name.toLowerCase().includes(q)
   );
 
   if (available.length === 0) {
-    container.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">No hay empleados disponibles para reconocer</p>';
+    container.innerHTML = '';
+    let emptyMsg = document.getElementById('people-empty-msg');
+    if (!emptyMsg) {
+      emptyMsg = document.createElement('p');
+      emptyMsg.id = 'people-empty-msg';
+      emptyMsg.className = 'text-sm text-gray-400 text-center py-4';
+      container.after(emptyMsg);
+    }
+    emptyMsg.textContent = `No se encontró ningún empleado con el nombre "${q}".`;
+    emptyMsg.classList.remove('hidden');
     return;
   }
+
+  const emptyMsg = document.getElementById('people-empty-msg');
+  if (emptyMsg) emptyMsg.classList.add('hidden');
 
   container.innerHTML = available.map(emp => {
     const initials    = emp.name.split(' ').map(n => n[0]).join('').toUpperCase();
@@ -643,7 +698,7 @@ function _renderSelectedBar() {
   bar.innerHTML = _selectedRecipients.map(r =>
     `<span class="inline-flex items-center gap-1 bg-white border border-violet-200 text-violet-700 text-xs font-medium px-2.5 py-1 rounded-full">
       ${esc(r.name)}
-      <button type="button" onclick="removeRecipient('${esc(r.id)}')" class="text-violet-400 hover:text-violet-600 leading-none font-bold">�</button>
+      <button type="button" onclick="removeRecipient('${esc(r.id)}')" class="text-violet-400 hover:text-violet-600 leading-none font-bold">×</button>
     </span>`
   ).join('') +
   `<span class="text-xs text-violet-500 font-semibold self-center ml-1">${_selectedRecipients.length} seleccionado${_selectedRecipients.length > 1 ? 's' : ''}</span>`;
@@ -686,12 +741,14 @@ function parseCSV(csvText) {
 
   const newEmployees = [];
   const duplicates   = [];
+  const toUpdate     = [];
 
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(',').map(c => c.trim());
     if (cols.length >= 5 && cols[0]) {
       const email = cols[emailIdx] || cols[1];
-      if (allUsers.find(emp => emp.email === email)) { duplicates.push(email); continue; }
+      const existing = allUsers.find(emp => emp.email === email);
+      if (existing) { duplicates.push(email); toUpdate.push({ existing, cols }); continue; }
       const rawRole = (roleIdx !== -1 ? cols[roleIdx] : '') || 'employee';
       const validRole = ['employee', 'admin', 'superadmin'].includes(rawRole) ? rawRole : 'employee';
 
@@ -727,19 +784,27 @@ function parseCSV(csvText) {
       });
     }
   }
-  return { employees: newEmployees, duplicates };
+  return { employees: newEmployees, duplicates, toUpdate, birthdayIdx, anniversaryIdx };
 }
 
 async function uploadEmployees() {
   if (!selectedFile) return;
-  if (currentUser?.role !== 'superadmin') { showErrorToast('Solo superadmin puede cargar empleados'); return; }
+  const role = currentUser?.role;
+  if (role !== 'superadmin' && role !== 'admin') {
+    showErrorToast('Solo administradores pueden cargar empleados');
+    return;
+  }
+  if (role === 'admin') {
+    await submitCsvRequest();
+    return;
+  }
 
   const reader = new FileReader();
   reader.onload = async (e) => {
-    const { employees: newEmps, duplicates } = parseCSV(e.target.result);
+    const { employees: newEmps, duplicates, toUpdate, birthdayIdx, anniversaryIdx } = parseCSV(e.target.result);
 
-    if (newEmps.length === 0) {
-      showErrorToast(duplicates.length > 0 ? `${duplicates.length} empleado(s) ya existen. No se cargó nada nuevo.` : 'No se pudieron procesar empleados del archivo');
+    if (newEmps.length === 0 && toUpdate.length === 0) {
+      showErrorToast('No se pudieron procesar empleados del archivo');
       return;
     }
 
@@ -775,9 +840,29 @@ async function uploadEmployees() {
       if (ci < chunks.length - 1) await new Promise(r => setTimeout(r, CSV_CHUNK_DELAY));
     }
 
+    // Update birthday/anniversary_date for existing users
+    for (const { existing, cols } of toUpdate) {
+      let birthday = null;
+      if (birthdayIdx !== -1 && cols[birthdayIdx]) {
+        const raw = cols[birthdayIdx].replace(/-/g, '/');
+        if (/^\d{1,2}\/\d{1,2}$/.test(raw)) birthday = raw.padStart(5, '0').substring(0, 5);
+      }
+      let anniversary_date = null;
+      if (anniversaryIdx !== -1 && cols[anniversaryIdx]) {
+        const raw = cols[anniversaryIdx];
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) anniversary_date = raw;
+        else if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) {
+          const [d, m, y] = raw.split('/');
+          anniversary_date = `${y}-${m}-${d}`;
+        }
+      }
+      await window.dataSdk.updateDates(existing.__backendId, birthday, anniversary_date);
+    }
+
     await window.dataSdk.refresh();
     filterEmployeesByCompany();
     renderEmployeesList();
+    renderAutoRecognitionsAdmin();
 
     btn.disabled = false;
     btn.innerHTML = '<i data-lucide="upload-cloud" class="w-4 h-4"></i> Cargar empleados';
@@ -811,6 +896,8 @@ function friendlyCsvError(raw) {
     return 'La contraseña no cumple los requisitos mínimos (al menos 6 caracteres).';
   if (r.includes('network') || r.includes('fetch') || r.includes('connection'))
     return 'Error de conexión. Verificá tu acceso a internet.';
+  if (r.includes('database error') || r.includes('db error'))
+    return 'Error de base de datos al crear el usuario. Causas comunes: el company_id no existe, la contraseña tiene menos de 6 caracteres, o hay un conflicto en la base de datos.';
   return raw;
 }
 
@@ -856,7 +943,7 @@ function showCsvResults(results, duplicates) {
         <div class="mt-0.5 shrink-0"><i data-lucide="skip-forward" class="w-4 h-4 text-amber-500"></i></div>
         <div class="min-w-0">
           <p class="text-sm font-semibold text-gray-800 truncate">${dup}</p>
-          <p class="text-xs text-amber-600 mt-0.5">Ya existe en la plataforma � omitido</p>
+          <p class="text-xs text-amber-600 mt-0.5">Ya existe en la plataforma &mdash; omitido</p>
         </div>
       </div>`;
   }
@@ -870,11 +957,440 @@ function closeCsvResultsModal() {
   document.getElementById('csv-results-modal').classList.add('hidden');
 }
 
-async function deleteEmployee(id) {
+// ── CSV Approval Workflow (admin: submit, superadmin: review) ──────────────────
+
+async function submitCsvRequest() {
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const csvText = e.target.result;
+    const { employees: newEmps } = parseCSV(csvText);
+
+    if (newEmps.length === 0) {
+      showErrorToast('El archivo no contiene empleados válidos o todos ya existen.');
+      return;
+    }
+
+    const btn = document.getElementById('upload-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Enviando solicitud...';
+    lucide.createIcons();
+
+    const result = await window.csvRequestSdk.submit(
+      currentUser.company_id,
+      selectedFile.name,
+      csvText,
+      newEmps.length,
+      currentUser.__backendId
+    );
+
+    btn.disabled = false;
+    btn.innerHTML = '<i data-lucide="send" class="w-4 h-4"></i> Enviar para aprobación';
+    lucide.createIcons();
+
+    if (!result.isOk) {
+      showErrorToast('No se pudo enviar la solicitud: ' + (result.error || 'Error desconocido'));
+      return;
+    }
+
+    if (result.data?.id) {
+      const { data: { session } } = await window._sb.auth.getSession().catch(() => ({ data: { session: null } }));
+      const token = session?.access_token;
+
+      if (token) {
+        // Notificaciones in-app para todos los superadmins
+        const superadminIds = allUsers.filter(u => u.role === 'superadmin').map(u => u.__backendId).filter(Boolean);
+        if (superadminIds.length > 0) {
+          fetch(`${SUPABASE_URL}/functions/v1/send-recognition-notifications`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({
+              notifications: superadminIds.map(saId => ({
+                user_id: saId,
+                type: 'csv_request',
+                data: {
+                  request_id: result.data.id,
+                  requester_name: currentUser.name,
+                  requester_id: currentUser.__backendId,
+                  company_id: currentUser.company_id,
+                  file_name: selectedFile?.name || 'archivo.csv',
+                  row_count: newEmps.length,
+                },
+              })),
+            }),
+          }).catch(() => {});
+        }
+
+      }
+    }
+
+    selectedFile = null;
+    document.getElementById('csv-file-input').value = '';
+    const hint = document.querySelector('.border-dashed p:last-child');
+    if (hint) hint.textContent = 'o arrastra y suelta aquí';
+    btn.disabled = true;
+
+    showSuccessToast(`Solicitud enviada (${newEmps.length} empleados). El superadmin la revisará pronto.`);
+    loadAdminCsvHistory();
+  };
+  reader.readAsText(selectedFile);
+}
+
+async function loadCsvRequests() {
+  if (currentUser?.role !== 'superadmin') return;
+  const { data } = await window.csvRequestSdk.list();
+  _csvRequestsData = data || [];
+  renderCsvRequestsList();
+  // Update pending badge
+  const pending = _csvRequestsData.filter(r => r.status === 'pending').length;
+  const badge = document.getElementById('csv-requests-badge');
+  if (badge) {
+    badge.textContent = pending;
+    badge.classList.toggle('hidden', pending === 0);
+  }
+}
+
+let _adminCsvHistoryRows = [];
+let _adminCsvHistoryPage = 0;
+const _ADMIN_CSV_PAGE_SIZE = 2;
+
+async function loadAdminCsvHistory() {
+  const { data } = await window.csvRequestSdk.list();
+  const myId = currentUser?.__backendId;
+  _adminCsvHistoryRows = (data || []).filter(r => r.requested_by === myId);
+  _adminCsvHistoryPage = 0;
+
+  const badge = document.getElementById('admin-csv-history-badge');
+  if (badge) {
+    const pending = _adminCsvHistoryRows.filter(r => r.status === 'pending').length;
+    badge.textContent = pending;
+    badge.classList.toggle('hidden', pending === 0);
+  }
+
+  renderAdminCsvHistory();
+}
+
+function renderAdminCsvHistory() {
+  const container = document.getElementById('admin-csv-history-list');
+  const pagination = document.getElementById('admin-csv-history-pagination');
+  if (!container) return;
+
+  if (_adminCsvHistoryRows.length === 0) {
+    container.innerHTML = '<p class="text-center py-6 text-gray-400 text-sm">Todavía no enviaste ninguna solicitud.</p>';
+    if (pagination) pagination.classList.add('hidden');
+    return;
+  }
+
+  const totalPages = Math.ceil(_adminCsvHistoryRows.length / _ADMIN_CSV_PAGE_SIZE);
+  const start = _adminCsvHistoryPage * _ADMIN_CSV_PAGE_SIZE;
+  const pageRows = _adminCsvHistoryRows.slice(start, start + _ADMIN_CSV_PAGE_SIZE);
+
+  const statusBadge = (s) => {
+    if (s === 'pending')  return '<span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-orange-100 text-orange-700">Pendiente</span>';
+    if (s === 'approved') return '<span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 text-green-700">Aprobada</span>';
+    return '<span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-red-100 text-red-700">Rechazada</span>';
+  };
+
+  container.innerHTML = pageRows.map(r => {
+    const date = new Date(r.created_at).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+    const rejection = r.status === 'rejected' && r.rejection_reason
+      ? `<p class="mt-2 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2"><span class="font-semibold">Motivo:</span> ${r.rejection_reason}</p>`
+      : '';
+    return `
+      <div class="flex flex-col gap-1 p-4 rounded-xl border border-gray-100 bg-gray-50">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2">
+            <i data-lucide="file-text" class="w-4 h-4 text-violet-400 shrink-0"></i>
+            <span class="text-sm font-semibold text-gray-800">${r.file_name || 'archivo.csv'}</span>
+            <span class="text-xs text-gray-400">${r.row_count} empleados</span>
+          </div>
+          <div class="flex items-center gap-2">
+            ${statusBadge(r.status)}
+            <span class="text-xs text-gray-400">${date}</span>
+          </div>
+        </div>
+        ${rejection}
+      </div>`;
+  }).join('');
+
+  if (pagination) {
+    pagination.classList.toggle('hidden', totalPages <= 1);
+    document.getElementById('admin-csv-page-info').textContent = `${_adminCsvHistoryPage + 1} / ${totalPages}`;
+    document.getElementById('admin-csv-prev').disabled = _adminCsvHistoryPage === 0;
+    document.getElementById('admin-csv-next').disabled = _adminCsvHistoryPage >= totalPages - 1;
+  }
+
+  lucide.createIcons();
+}
+
+function adminCsvHistoryPage(dir) {
+  const totalPages = Math.ceil(_adminCsvHistoryRows.length / _ADMIN_CSV_PAGE_SIZE);
+  _adminCsvHistoryPage = Math.max(0, Math.min(totalPages - 1, _adminCsvHistoryPage + dir));
+  renderAdminCsvHistory();
+}
+
+function toggleAdminCsvHistory() {
+  const body = document.getElementById('admin-csv-history-body');
+  const chevron = document.getElementById('admin-csv-history-chevron');
+  if (!body) return;
+  const isOpen = !body.classList.contains('hidden');
+  body.classList.toggle('hidden', isOpen);
+  if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+}
+
+function setCsvRequestTab(tab) {
+  _csvRequestTab = tab;
+  ['pending', 'approved', 'rejected'].forEach(t => {
+    const btn = document.getElementById(`csv-tab-${t}`);
+    if (!btn) return;
+    if (t === tab) {
+      btn.className = 'px-4 py-1.5 text-sm font-semibold rounded-lg transition bg-white text-violet-600 shadow-sm';
+    } else {
+      btn.className = 'px-4 py-1.5 text-sm font-semibold rounded-lg transition text-gray-500 hover:bg-gray-200';
+    }
+  });
+  renderCsvRequestsList();
+}
+
+function renderCsvRequestsList() {
+  const container = document.getElementById('csv-requests-list');
+  if (!container) return;
+
+  const filtered = _csvRequestsData.filter(r => r.status === _csvRequestTab);
+  if (filtered.length === 0) {
+    const labels = { pending: 'solicitudes pendientes', approved: 'solicitudes aprobadas', rejected: 'solicitudes rechazadas' };
+    container.innerHTML = `<p class="text-center py-8 text-gray-400 text-sm">No hay ${labels[_csvRequestTab] || 'solicitudes'}</p>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(req => {
+    const date = new Date(req.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const requester = allUsers.find(u => u.__backendId === req.requested_by);
+    const requesterName = requester?.name || 'Admin';
+    const requesterEmail = requester?.email ? ` (${requester.email})` : '';
+    const idJson = JSON.stringify(req.id);
+
+    let statusBadge = '';
+    if (req.status === 'pending')  statusBadge = '<span class="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pendiente</span>';
+    if (req.status === 'approved') statusBadge = '<span class="text-xs font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Aprobado</span>';
+    if (req.status === 'rejected') statusBadge = '<span class="text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Rechazado</span>';
+
+    const actionBtns = req.status === 'pending' ? `
+      <button onclick='approveCsvRequest(${idJson})' class="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-green-500 hover:bg-green-600 text-white rounded-lg transition">
+        <i data-lucide="check" class="w-3 h-3"></i> Aprobar
+      </button>
+      <button onclick='openRejectCsvModal(${idJson})' class="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition">
+        <i data-lucide="x" class="w-3 h-3"></i> Rechazar
+      </button>
+    ` : '';
+
+    return `
+      <div class="flex items-start justify-between gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="font-semibold text-gray-800 text-sm truncate">${esc(req.file_name || 'archivo.csv')}</span>
+            ${statusBadge}
+          </div>
+          <p class="text-xs text-gray-500">${esc(requesterName)}${esc(requesterEmail)} · ${esc(req.company_id)} · ${req.row_count} filas · ${date}</p>
+          ${req.rejection_reason ? `<p class="text-xs text-red-500 mt-1"><strong>Motivo:</strong> ${esc(req.rejection_reason)}</p>` : ''}
+        </div>
+        <div class="flex gap-2 shrink-0 flex-wrap justify-end">
+          <button onclick='openCsvPreviewModal(${idJson})' class="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-violet-100 hover:bg-violet-200 text-violet-700 rounded-lg transition">
+            <i data-lucide="table" class="w-3 h-3"></i> Ver CSV
+          </button>
+          ${actionBtns}
+        </div>
+      </div>
+    `;
+  }).join('');
+  lucide.createIcons();
+}
+
+function openCsvPreviewModal(id) {
+  _csvPreviewRequestId = id;
+  const req = _csvRequestsData.find(r => r.id === id);
+  if (!req) return;
+
+  const modal = document.getElementById('csv-preview-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+
+  const requesterName = allUsers.find(u => u.__backendId === req.requested_by)?.name || 'Admin';
+  const subtitle = document.getElementById('csv-preview-subtitle');
+  if (subtitle) subtitle.textContent = `${esc(requesterName)} · ${esc(req.company_id)} · ${req.row_count} filas · ${esc(req.file_name || 'archivo.csv')}`;
+
+  // Build HTML table from CSV
+  const container = document.getElementById('csv-preview-table-container');
+  if (container) {
+    try {
+      const lines = req.csv_content.split('\n').filter(l => l.trim());
+      if (lines.length < 1) {
+        container.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">Sin datos</p>';
+      } else {
+        const headers = lines[0].split(',').map(h => `<th class="px-3 py-2 text-left text-xs font-bold text-gray-600 whitespace-nowrap border-b border-gray-200">${esc(h.trim())}</th>`).join('');
+        const rows = lines.slice(1).map(line => {
+          const cells = line.split(',').map(c => `<td class="px-3 py-2 text-xs text-gray-700 whitespace-nowrap border-b border-gray-100">${esc(c.trim())}</td>`).join('');
+          return `<tr class="hover:bg-gray-50">${cells}</tr>`;
+        }).join('');
+        container.innerHTML = `
+          <div class="overflow-x-auto">
+            <table class="min-w-full border-collapse">
+              <thead class="bg-gray-50"><tr>${headers}</tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      }
+    } catch {
+      container.innerHTML = '<p class="text-red-500 text-sm text-center py-8">No se pudo procesar el archivo.</p>';
+    }
+  }
+
+  // Show/hide action buttons based on status
+  const actions = document.getElementById('csv-preview-actions');
+  const approveBtn = document.getElementById('csv-preview-approve-btn');
+  const rejectBtn  = document.getElementById('csv-preview-reject-btn');
+  if (approveBtn) {
+    approveBtn.onclick = () => { closeCsvPreviewModal(); approveCsvRequest(id); };
+    approveBtn.classList.toggle('hidden', req.status !== 'pending');
+  }
+  if (rejectBtn) {
+    rejectBtn.onclick = () => { closeCsvPreviewModal(); openRejectCsvModal(id); };
+    rejectBtn.classList.toggle('hidden', req.status !== 'pending');
+  }
+
+  lucide.createIcons();
+}
+
+function closeCsvPreviewModal() {
+  document.getElementById('csv-preview-modal')?.classList.add('hidden');
+  _csvPreviewRequestId = null;
+}
+
+async function approveCsvRequest(id) {
+  const req = _csvRequestsData.find(r => r.id === id);
+  if (!req) return;
+
+  // Optimistic update
+  req.status = 'approved';
+  renderCsvRequestsList();
+
+  const result = await window.csvRequestSdk.approve(id);
+
+  if (!result.isOk) {
+    // Revert
+    req.status = 'pending';
+    renderCsvRequestsList();
+    showErrorToast('Error al aprobar: ' + (result.error || 'Error desconocido'));
+    return;
+  }
+
+  const { okCount = 0, failCount = 0 } = result.data || {};
+  showSuccessToast(`CSV aprobado. ${okCount} empleados creados${failCount > 0 ? `, ${failCount} con errores` : ''}.`);
+
+  // Notificar al admin que lo solicitó (client-side para garantizar el destinatario correcto)
+  if (req.requested_by) {
+    const { data: { session } } = await window._sb.auth.getSession().catch(() => ({ data: { session: null } }));
+    const token = session?.access_token;
+    if (token) {
+      fetch(`${SUPABASE_URL}/functions/v1/send-recognition-notifications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          notifications: [{
+            user_id: req.requested_by,
+            type: 'csv_approved',
+            data: { request_id: req.id, file_name: req.file_name || 'archivo.csv', ok_count: okCount, fail_count: failCount },
+          }],
+        }),
+      }).catch(() => {});
+    }
+  }
+
+  await window.dataSdk.refresh();
+  filterEmployeesByCompany();
+  renderEmployeesList();
+  await loadCsvRequests();
+}
+
+function openRejectCsvModal(id) {
+  _pendingRejectId = id;
+  const modal = document.getElementById('reject-csv-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  const input = document.getElementById('reject-reason-input');
+  if (input) input.value = '';
+}
+
+function closeRejectCsvModal() {
+  document.getElementById('reject-csv-modal')?.classList.add('hidden');
+  _pendingRejectId = null;
+}
+
+async function confirmRejectCsvRequest() {
+  if (!_pendingRejectId) return;
+  const id = _pendingRejectId;
+  const reason = document.getElementById('reject-reason-input')?.value?.trim() || null;
+  closeRejectCsvModal();
+
+  // Optimistic update
+  const req = _csvRequestsData.find(r => r.id === id);
+  if (req) { req.status = 'rejected'; req.rejection_reason = reason; }
+  renderCsvRequestsList();
+
+  const result = await window.csvRequestSdk.reject(id, reason);
+
+  if (!result.isOk) {
+    if (req) { req.status = 'pending'; req.rejection_reason = null; }
+    renderCsvRequestsList();
+    showErrorToast('Error al rechazar la solicitud');
+    return;
+  }
+
+  showSuccessToast('Solicitud rechazada. El administrador recibirá una notificación.');
+  await loadCsvRequests();
+}
+
+let _deletingEmployeeId = null;
+
+function deleteEmployee(id) {
   const emp = allUsers.find(e => e.__backendId === id);
   if (!emp) return;
+  _deletingEmployeeId = id;
+  document.getElementById('delete-employee-name').textContent = emp.name;
+  document.getElementById('delete-employee-modal').classList.remove('hidden');
+  lucide.createIcons();
+}
+
+function closeDeleteEmployeeModal() {
+  document.getElementById('delete-employee-modal').classList.add('hidden');
+  _deletingEmployeeId = null;
+}
+
+async function confirmDeleteEmployee() {
+  if (!_deletingEmployeeId) return;
+  const emp = allUsers.find(e => e.__backendId === _deletingEmployeeId);
+  if (!emp) { closeDeleteEmployeeModal(); return; }
+
+  const btn = document.getElementById('delete-employee-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Eliminando...';
+
+  await window.dataSdk.preserveUserNames(emp.__backendId, emp.name);
   const result = await window.dataSdk.delete(emp);
-  if (result.isOk) showSuccessToast(`${emp.name} eliminado`);
+
+  btn.disabled = false;
+  btn.textContent = 'Eliminar';
+
+  if (!result.isOk) {
+    showErrorToast('No se pudo eliminar el usuario. Intentá de nuevo.');
+    closeDeleteEmployeeModal();
+    return;
+  }
+
+  allUsers = allUsers.filter(u => u.__backendId !== _deletingEmployeeId);
+  closeDeleteEmployeeModal();
+  filterEmployeesByCompany();
+  renderEmployeesList();
+  showSuccessToast(`${emp.name} eliminado correctamente`);
 }
 
 async function clearAllEmployees() {
@@ -943,6 +1459,7 @@ async function savePoints() {
 
 function openRoleModal(empId) {
   if (!currentUser || currentUser.role !== 'superadmin') { showErrorToast('Solo superadmins pueden cambiar roles de usuarios'); return; }
+  if (empId === currentUser.__backendId) { showErrorToast('No podés cambiar tu propio rol. Pedíselo a otro superadmin.'); return; }
   const emp = allUsers.find(u => u.__backendId === empId);
   if (!emp) return;
   selectedEmployeeForRole = empId;
@@ -958,6 +1475,7 @@ function closeRoleModal() { document.getElementById('role-modal').classList.add(
 async function saveRoleChange() {
   if (!currentUser || currentUser.role !== 'superadmin') { showErrorToast('Solo superadmins pueden cambiar roles'); return; }
   if (!selectedEmployeeForRole) { showErrorToast('No hay empleado seleccionado'); return; }
+  if (selectedEmployeeForRole === currentUser.__backendId) { showErrorToast('No podés cambiar tu propio rol.'); closeRoleModal(); return; }
 
   const newRole = document.querySelector('input[name="new-role"]:checked')?.value;
   if (!newRole) { showErrorToast('Seleccioná un rol'); return; }
@@ -997,6 +1515,200 @@ async function saveRoleChange() {
   }
 }
 
+// ── Global search ─────────────────────────────────────────────────────────────
+
+const _SEARCH_FEATURES = [
+  { label: 'Reconocimientos',         icon: 'home',          action: () => { navigateTo('home'); } },
+  { label: 'Mis puntos',              icon: 'coins',         action: () => { openPointsPage(); } },
+  { label: 'Tienda de recompensas',   icon: 'shopping-bag',  action: () => { navigateTo('store'); } },
+  { label: 'Programas',               icon: 'award',         action: () => { openProgramsPage(); } },
+  { label: 'Notificaciones',          icon: 'bell',          action: () => { openNotificationsPage(); } },
+  { label: 'Mi perfil',               icon: 'user',          action: () => { openUserProfilePage(); } },
+  { label: 'Editar perfil',           icon: 'settings',      action: () => { openProfilePage(); } },
+  { label: 'Panel de administración', icon: 'shield',        action: () => { navigateTo('admin'); }, adminOnly: true },
+  { label: 'Analytics',               icon: 'bar-chart-2',   action: () => { openAnalyticsPage(); }, adminOnly: true },
+  { label: 'Reconocimientos automáticos', icon: 'calendar-heart', action: () => { navigateTo('admin'); setTimeout(() => document.getElementById('admin-tab-auto')?.click(), 300); }, adminOnly: true },
+  { label: 'Gestión de empresas',     icon: 'building-2',    action: () => { navigateTo('admin'); }, superOnly: true },
+];
+
+function onGlobalSearch(q) {
+  const panel = document.getElementById('global-search-results');
+  if (!panel) return;
+  q = q.trim();
+  if (!q) { panel.classList.add('hidden'); return; }
+
+  const lq = q.toLowerCase();
+  const isAdmin  = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
+  const isSuper  = currentUser?.role === 'superadmin';
+  const companyId = currentUser?.company_id;
+
+  // People
+  const people = (allUsers || []).filter(u => {
+    if (!isSuper && u.company_id !== companyId) return false;
+    return (u.name||'').toLowerCase().includes(lq) ||
+           (u.email||'').toLowerCase().includes(lq) ||
+           (u.department||'').toLowerCase().includes(lq);
+  }).slice(0, 5);
+
+  // Programs
+  const programs = (companyPrograms || []).filter(p =>
+    !p.pending &&
+    ((p.name||'').toLowerCase().includes(lq) ||
+     (p.tag||'').toLowerCase().includes(lq) ||
+     (p.description||'').toLowerCase().includes(lq))
+  ).slice(0, 4);
+
+  // Features
+  const features = _SEARCH_FEATURES.filter(f => {
+    if (f.superOnly && !isSuper) return false;
+    if (f.adminOnly && !isAdmin) return false;
+    return f.label.toLowerCase().includes(lq);
+  }).slice(0, 4);
+
+  if (!people.length && !programs.length && !features.length) {
+    panel.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">Sin resultados para "' + esc(q) + '"</p>';
+    panel.classList.remove('hidden');
+    return;
+  }
+
+  let html = '';
+
+  if (people.length) {
+    html += '<p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide px-4 pt-3 pb-1">Personas</p>';
+    html += people.map(u => {
+      const initials = (u.name||'?').split(' ').map(n=>n[0]).join('').toUpperCase().substring(0,2);
+      const color = getAvatarColor(u.name||'');
+      return `<button onclick="_searchGoUser('${esc(u.__backendId)}')"
+        class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-violet-50 transition text-left">
+        <div class="w-8 h-8 rounded-full ${color} flex items-center justify-center text-white text-xs font-bold shrink-0">${esc(initials)}</div>
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-gray-800 truncate">${esc(u.name)}</p>
+          <p class="text-xs text-gray-400 truncate">${esc(u.department || u.email || '')}</p>
+        </div>
+      </button>`;
+    }).join('');
+  }
+
+  if (programs.length) {
+    html += '<p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide px-4 pt-3 pb-1">Programas</p>';
+    html += programs.map(p =>
+      `<button onclick="_searchGoProgram()"
+        class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-violet-50 transition text-left">
+        <span class="text-xl shrink-0">${p.emoji || '⭐'}</span>
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-gray-800 truncate">${esc(p.name)}</p>
+          ${p.tag ? `<p class="text-xs text-gray-400">#${esc(p.tag)}</p>` : ''}
+        </div>
+      </button>`
+    ).join('');
+  }
+
+  if (features.length) {
+    html += '<p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide px-4 pt-3 pb-1">Funcionalidades</p>';
+    html += features.map((f, i) =>
+      `<button onclick="_searchRunFeature(${_SEARCH_FEATURES.indexOf(f)})"
+        class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-violet-50 transition text-left">
+        <div class="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+          <i data-lucide="${f.icon}" class="w-3.5 h-3.5 text-gray-500"></i>
+        </div>
+        <p class="text-sm text-gray-700">${esc(f.label)}</p>
+      </button>`
+    ).join('');
+  }
+
+  panel.innerHTML = html;
+  panel.classList.remove('hidden');
+  lucide.createIcons();
+}
+
+function _searchGoUser(userId) {
+  _closeGlobalSearch();
+  if (userId === currentUser?.__backendId) { openUserProfilePage(); return; }
+  const u = allUsers.find(x => x.__backendId === userId);
+  if (!u) return;
+  openPeekProfile(u);
+}
+
+function openPeekProfile(u) {
+  let modal = document.getElementById('peek-profile-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'peek-profile-modal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closePeekProfile()"></div>
+      <div id="peek-profile-card" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col items-center gap-3 z-10"></div>`;
+    document.body.appendChild(modal);
+  }
+  const initials   = (u.name||'?').split(' ').map(n=>n[0]).join('').toUpperCase().substring(0,2);
+  const color      = getAvatarColor(u.name||'');
+  const roleLabels = { superadmin:'Superadmin', admin:'Admin', employee:'Empleado' };
+  const card       = document.getElementById('peek-profile-card');
+  card.innerHTML = `
+    <button onclick="closePeekProfile()" class="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+      <i data-lucide="x" class="w-4 h-4"></i>
+    </button>
+    <div class="w-20 h-20 rounded-full ${color} flex items-center justify-center text-white text-3xl font-bold">${esc(initials)}</div>
+    <div class="text-center">
+      <p class="text-lg font-bold text-gray-800">${esc(u.name)}</p>
+      <p class="text-sm text-gray-400">${esc(u.department || roleLabels[u.role] || u.role || '')}</p>
+      ${u.email ? `<p class="text-xs text-gray-400 mt-0.5">${esc(u.email)}</p>` : ''}
+    </div>
+    ${u.points_received != null ? `<div class="flex gap-4 text-center mt-1">
+      <div><p class="text-lg font-bold text-violet-600">${u.points_received ?? 0}</p><p class="text-[10px] text-gray-400">pts recibidos</p></div>
+    </div>` : ''}
+    <button onclick="openRecognitionFromPeek('${esc(u.__backendId)}')"
+      class="mt-2 btn-recognize text-white px-5 py-2 rounded-full text-sm font-semibold flex items-center gap-1.5">
+      <i data-lucide="heart" class="w-4 h-4"></i> Reconocer
+    </button>`;
+  modal.classList.remove('hidden');
+  lucide.createIcons();
+}
+
+function closePeekProfile() {
+  document.getElementById('peek-profile-modal')?.classList.add('hidden');
+}
+
+function openRecognitionFromPeek(userId) {
+  closePeekProfile();
+  const u = allUsers.find(x => x.__backendId === userId);
+  if (!u) return;
+  openModal();
+  // Pre-select this person as recipient
+  setTimeout(() => {
+    _selectedRecipients = [{ id: u.__backendId, name: u.name }];
+    _renderSelectedBar();
+    updateModalBtn();
+    showStep(2);
+  }, 50);
+}
+
+function _searchGoProgram() {
+  _closeGlobalSearch();
+  openProgramsPage();
+}
+
+function _searchRunFeature(idx) {
+  _closeGlobalSearch();
+  _SEARCH_FEATURES[idx]?.action();
+}
+
+function _closeGlobalSearch() {
+  const input = document.getElementById('global-search-input');
+  const panel = document.getElementById('global-search-results');
+  if (input) input.value = '';
+  if (panel) panel.classList.add('hidden');
+}
+
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('global-search-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    document.getElementById('global-search-results')?.classList.add('hidden');
+  }
+});
+
+// ── End global search ──────────────────────────────────────────────────────────
+
 function showSuccessToast(msg) {
   const toast = document.getElementById('success-toast');
   toast.innerHTML = `<i data-lucide="check-circle" class="w-5 h-5"></i> <span>${esc(msg)}</span>`;
@@ -1019,6 +1731,7 @@ function toggleNotificationsDropdown(e) {
   e.stopPropagation();
   document.getElementById('notifications-dropdown').classList.toggle('hidden');
 }
+function toggleNotifications(e) { toggleNotificationsDropdown(e); }
 
 function openNotificationsPage() {
   currentPage = 'notifications';
@@ -1052,125 +1765,46 @@ function switchNotificationTab(tab) {
   renderNotificationsPage();
 }
 
-function renderNotificationsPage() {
-  const container = document.getElementById('notifications-list-page');
-  const filtered  = notificationsTab === 'unread' ? notificationsList.filter(n => !n.read) : notificationsList;
 
-  if (filtered.length === 0) {
-    container.innerHTML = `
-      <div class="text-center py-16">
-        <i data-lucide="inbox" class="w-16 h-16 mx-auto text-gray-300 mb-4"></i>
-        <p class="text-gray-500 font-medium">${notificationsTab === 'unread' ? 'No hay notificaciones sin leer' : 'No hay notificaciones'}</p>
-      </div>`;
-    lucide.createIcons();
-    return;
-  }
-
-  container.innerHTML = filtered.map(notif => {
-    const unreadClass = notif.read ? 'border-gray-200 bg-white' : 'border-violet-300 bg-violet-50';
-    const nid   = Number.isInteger(notif.id) ? notif.id : 0;
-    const nname = esc(notif.name  || '');
-    const nact  = esc(notif.action || '');
-    const nmsg  = esc(notif.message || '');
-    const ntime = esc(notif.time  || '');
-    // ------------------------------------------------------------
-    const initial = esc((notif.name || '?').charAt(0).toUpperCase());
-
-    const actions = `
-      <div class="flex gap-2 shrink-0">
-        <button onclick="markNotificationRead(${nid})" class="p-2 rounded-lg hover:bg-gray-100 transition" title="Marcar como leída">
-          <i data-lucide="check" class="w-4 h-4 text-gray-400 hover:text-violet-600"></i>
-        </button>
-        <button onclick="deleteNotification(${nid})" class="p-2 rounded-lg hover:bg-red-50 transition" title="Eliminar">
-          <i data-lucide="trash-2" class="w-4 h-4 text-gray-400 hover:text-red-500"></i>
-        </button>
-      </div>`;
-
-    if (notif.type === 'comment') {
-      return `
-        <div class="p-4 rounded-xl border ${notif.read ? 'border-gray-200 bg-white' : 'border-blue-300 bg-blue-50'} hover:shadow-md transition cursor-pointer group">
-          <div class="flex items-start gap-3">
-            <div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0 group-hover:scale-105 transition">${initial}</div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm text-gray-800"><span class="font-semibold">${nname}</span> ${nact}</p>
-              <p class="text-xs text-gray-600 mt-1.5 italic">"${nmsg}"</p>
-              <p class="text-xs text-gray-400 mt-1"><i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${ntime}</p>
-            </div>${actions}
-          </div>
-        </div>`;
-    }
-    if (notif.type === 'milestone') {
-      return `
-        <div class="p-4 rounded-xl border ${notif.read ? 'border-gray-200 bg-white' : 'border-yellow-300 bg-yellow-50'} hover:shadow-md transition cursor-pointer group">
-          <div class="flex items-start gap-3">
-            <div class="w-10 h-10 rounded-full bg-[#f19ac4] flex items-center justify-center text-white font-bold shrink-0 group-hover:scale-105 transition">�x}�</div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm text-gray-800"><span class="font-semibold">${nname}</span> ${nact}</p>
-              <p class="text-xs text-gray-400 mt-1"><i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${ntime}</p>
-            </div>
-            <span class="text-2xl shrink-0">${nemoji}</span>
-            ${actions}
-          </div>
-        </div>`;
-    }
-    // recognition / reaction_multiple
-    const avatarGrad = notif.type === 'reaction_multiple' ? 'bg-[#c9a7d4]' : 'bg-[#3d2b56]';
-    const avatarContent = notif.type === 'reaction_multiple'
-      ? `+${Math.floor(Math.random() * 5) + 2}`
-      : initial;
-    const borderCol = notif.type === 'reaction_multiple'
-      ? (notif.read ? 'border-gray-200 bg-white' : 'border-purple-300 bg-purple-50')
-      : unreadClass;
-    return `
-      <div class="p-4 rounded-xl border ${borderCol} hover:shadow-md transition cursor-pointer group">
-        <div class="flex items-start gap-3">
-          <div class="w-10 h-10 rounded-full ${avatarGrad} flex items-center justify-center text-white font-bold shrink-0 group-hover:scale-105 transition text-xs">${avatarContent}</div>
-          <div class="flex-1 min-w-0">
-            <p class="text-sm text-gray-800"><span class="font-semibold">${nname}</span> ${nact}</p>
-            <p class="text-xs text-gray-400 mt-1"><i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${ntime}</p>
-          </div>
-          ${nemoji ? `<span class="text-2xl shrink-0">${nemoji}</span>` : ''}
-          ${actions}
-        </div>
-      </div>`;
-  }).join('');
-
-  lucide.createIcons();
-}
-
-function markNotificationRead(id) {
-  const n = notificationsList.find(n => n.id === id);
-  if (n) { n.read = true; renderNotificationsPage(); updateNotificationBadge(); }
-}
-
-function deleteNotification(id) {
-  notificationsList = notificationsList.filter(n => n.id !== id);
-  renderNotificationsPage();
+async function markNotificationRead(id) {
+  const n = _notificationsData.find(n => n.id === id);
+  if (!n || n.read) return;
+  n.read = true;
   updateNotificationBadge();
-
-  const toast = document.createElement('div');
-  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-gray-700 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 text-sm font-semibold';
-  toast.style.animation = 'scaleIn 0.3s ease';
-  toast.innerHTML = '<i data-lucide="trash-2" class="w-5 h-5"></i> <span>Notificación eliminada</span>';
-  document.body.appendChild(toast);
-  lucide.createIcons();
-  setTimeout(() => toast.remove(), 2000);
+  renderNotificationsPage();
+  renderNotificationsDropdown();
+  await window.notificationSdk.markRead(id);
 }
 
-function markAllAsRead() {
-  notificationsList.forEach(n => n.read = true);
-  renderNotificationsPage();
+async function deleteNotification(id) {
+  _notificationsData = _notificationsData.filter(n => n.id !== id);
   updateNotificationBadge();
+  renderNotificationsPage();
+  renderNotificationsDropdown();
+  showSuccessToast('Notificación eliminada');
+  await window.notificationSdk.remove(id);
+}
+
+async function markAllAsRead() {
+  _notificationsData.forEach(n => n.read = true);
+  updateNotificationBadge();
+  renderNotificationsPage();
+  renderNotificationsDropdown();
   showSuccessToast('Todas las notificaciones marcadas como leídas');
+  await window.notificationSdk.markAllRead();
 }
 
 function updateNotificationBadge() {
-  const unread  = notificationsList.filter(n => !n.read).length;
-  document.getElementById('btn-notif').classList.toggle('notification-dot', unread > 0);
+  const unread = _notificationsData.filter(n => !n.read).length;
+  document.getElementById('btn-notif')?.classList.toggle('notification-dot', unread > 0);
 }
 
-function clearNotifications() {
-  document.getElementById('notifications-list').innerHTML = '<div class="p-6 text-center text-gray-400 text-sm">No hay notificaciones</div>';
+async function clearNotifications() {
+  _notificationsData.forEach(n => n.read = true);
+  updateNotificationBadge();
+  renderNotificationsDropdown();
+  renderNotificationsPage();
+  await window.notificationSdk.markAllRead();
 }
 
 document.addEventListener('click', (e) => {
@@ -1336,53 +1970,109 @@ async function saveDates() {
 }
 
 function _loadAboutMe() {
-  try {
-    const raw  = localStorage.getItem(_aboutMeKey());
-    const data = raw ? JSON.parse(raw) : {};
-    const set  = (id, val) => {
-      const el = document.getElementById(id);
-      if (el) { el.value = val||''; updateAboutMeCounter(el, id.replace('up-','up-').replace(/$/,'-count'), parseInt(el.maxLength)||250); }
-    };
-    set('up-bio',       data.bio       || '');
-    set('up-interests', data.interests || '');
-    set('up-workstyle', data.workStyle  || '');
-    _renderAboutMeTags('up-interests', 'up-interests-tags');
-    _renderAboutMeTags('up-workstyle',  'up-workstyle-tags');
-    // Load preferences
-    _applyPrefButtons('vis',  data.visibility || 'public');
-    _applyPrefButtons('bday', data.birthday   || 'yes');
-  } catch(_) {}
+  if (!currentUser) return;
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) { el.value = val || ''; updateAboutMeCounter(el, id.replace('up-','up-').replace(/$/,'-count'), parseInt(el.maxLength)||250); }
+  };
+  // Read from currentUser (Supabase), fallback to localStorage for migration
+  const lsRaw  = localStorage.getItem(_aboutMeKey());
+  const lsData = lsRaw ? JSON.parse(lsRaw) : {};
+  set('up-bio',       currentUser.bio        || lsData.bio       || '');
+  set('up-interests', currentUser.interests  || lsData.interests || '');
+  set('up-workstyle', currentUser.work_style || lsData.workStyle || '');
+  _renderAboutMeTags('up-interests', 'up-interests-tags');
+  _renderAboutMeTags('up-workstyle',  'up-workstyle-tags');
+  // Preferences from Supabase
+  const vis  = currentUser.recognition_visibility || lsData.visibility || 'public';
+  const bday = (currentUser.auto_birthday !== false && currentUser.auto_anniversary !== false) ? 'yes' : 'no';
+  _applyPrefButtons('vis',  vis);
+  _applyPrefButtons('bday', bday);
 }
 
 function saveAboutMe() {
-  try {
-    const get  = id => document.getElementById(id)?.value?.trim() || '';
-    const raw  = localStorage.getItem(_aboutMeKey());
-    const prev = raw ? JSON.parse(raw) : {};
-    localStorage.setItem(_aboutMeKey(), JSON.stringify({
-      bio:        get('up-bio'),
-      interests:  get('up-interests'),
-      workStyle:  get('up-workstyle'),
-      visibility: prev.visibility || 'public',
-      birthday:   prev.birthday   || 'yes',
-    }));
-    _renderAboutMeTags('up-interests', 'up-interests-tags');
-    _renderAboutMeTags('up-workstyle',  'up-workstyle-tags');
-    const s = document.getElementById('up-bio-saved');
-    if (s) { s.classList.remove('hidden'); setTimeout(() => s.classList.add('hidden'), 1800); }
-  } catch(_) {}
+  if (!currentUser) return;
+  const get = id => document.getElementById(id)?.value?.trim() || '';
+  const bio        = get('up-bio');
+  const interests  = get('up-interests');
+  const work_style = get('up-workstyle');
+
+  // Update in-memory
+  currentUser.bio        = bio        || null;
+  currentUser.interests  = interests  || null;
+  currentUser.work_style = work_style || null;
+
+  // Persist to Supabase
+  window.dataSdk.update({ ...currentUser, bio, interests, work_style }).catch(() => {});
+
+  _renderAboutMeTags('up-interests', 'up-interests-tags');
+  _renderAboutMeTags('up-workstyle',  'up-workstyle-tags');
+  const s = document.getElementById('up-bio-saved');
+  if (s) { s.classList.remove('hidden'); setTimeout(() => s.classList.add('hidden'), 1800); }
 }
 
 function setRecognitionPref(type, value) {
+  if (!currentUser) return;
+  _applyPrefButtons(type === 'visibility' ? 'vis' : 'bday', value);
+
+  // Update in-memory only — actual save triggered by saveRecognitionPrefs()
+  if (type === 'visibility') {
+    currentUser.recognition_visibility = value;
+  } else {
+    const optIn = value === 'yes';
+    currentUser.auto_birthday    = optIn;
+    currentUser.auto_anniversary = optIn;
+  }
+
+  // Hide any previous status messages
+  document.getElementById('pref-saved-msg')?.classList.add('hidden');
+  document.getElementById('pref-error-msg')?.classList.add('hidden');
+}
+
+async function saveRecognitionPrefs() {
+  if (!currentUser) return;
+
+  const btn = document.querySelector('[onclick="saveRecognitionPrefs()"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
+  let isOk = false;
   try {
-    const raw  = localStorage.getItem(_aboutMeKey());
-    const data = raw ? JSON.parse(raw) : {};
-    data[type === 'visibility' ? 'visibility' : 'birthday'] = value;
-    localStorage.setItem(_aboutMeKey(), JSON.stringify(data));
-    _applyPrefButtons(type === 'visibility' ? 'vis' : 'bday', value);
-    const s = document.getElementById('up-bio-saved');
-    if (s) { s.classList.remove('hidden'); setTimeout(() => s.classList.add('hidden'), 1800); }
-  } catch(_) {}
+    const result = await window.dataSdk.updatePreferences({
+      recognition_visibility: currentUser.recognition_visibility || 'public',
+      auto_birthday:          currentUser.auto_birthday ?? true,
+      auto_anniversary:       currentUser.auto_anniversary ?? true,
+    });
+    isOk = result.isOk;
+    if (!isOk) console.error('[saveRecognitionPrefs] updatePreferences failed', result);
+  } catch (e) {
+    console.error('[saveRecognitionPrefs] exception:', e);
+    isOk = false;
+  }
+
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = 'Guardar preferencias';
+  }
+
+  if (isOk) {
+    // Sync allUsers so the privacy hint in the recognition modal is up to date
+    const idx = allUsers.findIndex(u => u.__backendId === currentUser.__backendId);
+    if (idx !== -1) {
+      allUsers[idx].recognition_visibility = currentUser.recognition_visibility || 'public';
+      allUsers[idx].auto_birthday          = currentUser.auto_birthday ?? true;
+      allUsers[idx].auto_anniversary       = currentUser.auto_anniversary ?? true;
+    }
+
+    const msg = document.getElementById('pref-saved-msg');
+    if (msg) {
+      msg.classList.remove('hidden');
+      lucide.createIcons({ nodes: [msg] });
+      setTimeout(() => msg.classList.add('hidden'), 2500);
+    }
+  } else {
+    const err = document.getElementById('pref-error-msg');
+    if (err) { err.classList.remove('hidden'); setTimeout(() => err.classList.add('hidden'), 3000); }
+  }
 }
 
 function _applyPrefButtons(group, value) {
@@ -1468,7 +2158,7 @@ function _renderUpFeed() {
 
   feed.innerHTML = recs.slice(0, 20).map(r => {
     const isSent       = r.from_user?.id === userId;
-    const other        = isSent ? (r.to_user?.name || 'Alguien') : (r.from_user?.name || 'Alguien');
+    const other        = isSent ? (r.to_user?.name || 'Usuario eliminado') : (r.from_user?.name || 'Usuario eliminado');
     const otherInitial = (other[0] || '?').toUpperCase();
     const time         = formatTimeAgo(r.created_at);
     const program      = r.program || '';
@@ -1482,7 +2172,7 @@ function _renderUpFeed() {
       : `<span class="text-[10px] font-bold uppercase tracking-wide text-[#e87cb4] bg-rosa-50 px-2 py-0.5 rounded-full">Recibido</span>`;
     const pointsBadge = points > 0
       ? isSent
-        ? `<span class="text-xs font-semibold text-[#3d2b56]">��${points} pts</span>`
+        ? `<span class="text-xs font-semibold text-[#3d2b56]">-${points} pts</span>`
         : `<span class="text-xs font-semibold text-[#e87cb4]">+${points} pts</span>`
       : '';
     const messageEl = message
@@ -1521,7 +2211,7 @@ function _renderUserProfile() {
   el('up-name').textContent    = u.name    || '—';
   el('up-role').textContent    = u.role    || '—';
   el('up-company').textContent = u.company || '—';
-  el('up-points').textContent  = (u.points_to_give ?? '�');
+  el('up-points').textContent  = (u.points_to_give ?? '–');
 
   const allRecs = window._allRecognitions || [];
   const userId  = u.__backendId;
@@ -1682,13 +2372,43 @@ function openAdmin() {
   ap.classList.remove('hidden');
   _positionOverlayPage('admin-page');
   updateAdminVisibility();
+  updateAdminQuicknav();
   loadCompanyPrograms();
   renderAutoRecognitionsAdmin();
+  if (currentUser?.role === 'superadmin') { loadCompanies(); loadCsvRequests(); }
+  if (currentUser?.role === 'admin') { loadAdminCsvHistory(); }
 }
 function openAdminPage() { openAdmin(); }
 
 // ── Auto Recognitions Admin ───────────────────────────────────────────────────
+function adminScrollTo(sectionId) {
+  const section = document.getElementById(sectionId);
+  const main = document.querySelector('#admin-page main');
+  if (!section || !main) return;
+  const offset = section.offsetTop - 60;
+  main.scrollTo({ top: offset, behavior: 'smooth' });
+}
+
+function updateAdminQuicknav() {
+  const isSA = currentUser?.role === 'superadmin';
+  const isAdminOnly = currentUser?.role === 'admin';
+  document.getElementById('qnav-my-requests')?.classList.toggle('hidden', !isAdminOnly);
+  document.getElementById('qnav-companies')?.classList.toggle('hidden', !isSA);
+  document.getElementById('qnav-csv-requests')?.classList.toggle('hidden', !isSA);
+}
+
+function toggleArSection() {
+  const body = document.getElementById('ar-body');
+  const chevron = document.getElementById('ar-chevron');
+  if (!body) return;
+  const isOpen = !body.classList.contains('hidden');
+  body.classList.toggle('hidden', isOpen);
+  if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+}
+
 let _arSettings = null;
+let _arSnapshot  = null; // form values at last load/save, used for dirty-check
+let _arMonthOffset = 0; // 0 = current month
 
 const _AR_DEFAULTS = {
   birthday_message:    '¡Feliz cumpleaños, {nombre}! Hoy el equipo entero te celebra. Gracias por ser parte de esto.',
@@ -1713,15 +2433,33 @@ async function renderAutoRecognitionsAdmin() {
   if (g('ar-anniversary-message'))  g('ar-anniversary-message').value   = s.anniversary_message || _AR_DEFAULTS.anniversary_message;
   if (g('ar-birthday-points'))      g('ar-birthday-points').value       = s.birthday_points    ?? 0;
   if (g('ar-anniversary-points'))   g('ar-anniversary-points').value    = s.anniversary_points ?? 0;
-  if (g('ar-send-time'))            g('ar-send-time').value             = s.send_time           || '09:00';
+  // Populate hour select (0–23) and set saved values
+  const hourSel = g('ar-send-hour');
+  if (hourSel && !hourSel.options.length) {
+    for (let h = 0; h < 24; h++) {
+      const opt = document.createElement('option');
+      opt.value = String(h).padStart(2, '0');
+      opt.textContent = String(h).padStart(2, '0');
+      hourSel.appendChild(opt);
+    }
+  }
+  const [savedHour = '09', savedMin = '00'] = (s.send_time || '09:00').split(':');
+  if (hourSel) hourSel.value = savedHour;
+  const minSel = g('ar-send-minute');
+  if (minSel) minSel.value = ['00','15','30','45'].includes(savedMin) ? savedMin : '00';
+
+  // Snapshot form state so we can detect real changes on save
+  _arSnapshot = _arFormValues();
 
   // Populate program selects
   _populateArProgramSelect('ar-birthday-program',    s.birthday_program);
   _populateArProgramSelect('ar-anniversary-program', s.anniversary_program);
 
-  // Render upcoming + employees
-  _renderArUpcoming();
-  _renderArEmployees();
+  // Reset to current month each time the panel opens
+  _arMonthOffset = 0;
+
+  // Render month calendar + employees
+  _renderArMonth();
   lucide.createIcons();
 }
 
@@ -1741,70 +2479,85 @@ function _todayDDMM() {
   return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0');
 }
 
-function _upcomingDates(daysAhead = 30) {
+const _AR_MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+function _arPrevMonth() { _arMonthOffset--; _renderArMonth(); }
+function _arNextMonth() { _arMonthOffset++; _renderArMonth(); }
+
+function _renderArMonth() {
+  const el     = document.getElementById('ar-upcoming-list');
+  const cnt    = document.getElementById('ar-upcoming-count');
+  const label  = document.getElementById('ar-month-label');
+  if (!el) return;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const target = new Date(today.getFullYear(), today.getMonth() + _arMonthOffset, 1);
+  const month  = target.getMonth();
+  const year   = target.getFullYear();
+
+  const isCurrentMonth = (month === today.getMonth() && year === today.getFullYear());
+  const isToday = (day) => isCurrentMonth && day === today.getDate();
+
+  if (label) label.textContent = `${_AR_MONTH_NAMES[month]} ${year}`;
+
   const companyId = currentUser?.company_id;
   const users = allUsers.filter(u => u.company_id === companyId);
-  const today  = new Date(); today.setHours(0,0,0,0);
   const events = [];
 
   users.forEach(u => {
-    // Birthdays
     if (u.birthday && u.auto_birthday !== false) {
       const [dd, mm] = u.birthday.split('/').map(Number);
-      for (let yr = today.getFullYear(); yr <= today.getFullYear() + 1; yr++) {
-        const d = new Date(yr, mm-1, dd);
-        const diff = Math.round((d - today) / 86400000);
-        if (diff >= 0 && diff <= daysAhead) {
-          events.push({ type:'birthday', name: u.name, dept: u.department||'', date: u.birthday, daysLeft: diff, label: diff === 0 ? 'Hoy' : `en ${diff} día${diff>1?'s':''}` });
-        }
+      if (mm - 1 === month) {
+        events.push({ type: 'birthday', name: u.name, dept: u.department || '', day: dd, years: null });
       }
     }
-    // Anniversaries
     if (u.anniversary_date && u.auto_anniversary !== false) {
-      const base = new Date(u.anniversary_date);
-      const yr   = today.getFullYear();
-      const next = new Date(yr, base.getMonth(), base.getDate());
-      if (next < today) next.setFullYear(yr + 1);
-      const diff = Math.round((next - today) / 86400000);
-      if (diff >= 0 && diff <= daysAhead) {
-        const years = next.getFullYear() - base.getFullYear();
-        events.push({ type:'anniversary', name: u.name, dept: u.department||'', date: u.anniversary_date, daysLeft: diff, years, label: diff === 0 ? 'Hoy' : `en ${diff} día${diff>1?'s':''}` });
+      const base = new Date(u.anniversary_date + 'T00:00:00');
+      if (base.getMonth() === month) {
+        const years = year - base.getFullYear();
+        events.push({ type: 'anniversary', name: u.name, dept: u.department || '', day: base.getDate(), years: years > 0 ? years : null });
       }
     }
   });
 
-  return events.sort((a,b) => a.daysLeft - b.daysLeft);
-}
+  events.sort((a, b) => a.day - b.day || a.name.localeCompare(b.name, 'es'));
 
-function _renderArUpcoming() {
-  const el  = document.getElementById('ar-upcoming-list');
-  const cnt = document.getElementById('ar-upcoming-count');
-  if (!el) return;
-  const events = _upcomingDates(30);
   if (cnt) cnt.textContent = events.length;
+
   if (!events.length) {
-    el.innerHTML = '<p class="text-xs text-gray-400 italic">Sin fechas próximas en los próximos 30 días.</p>';
+    el.innerHTML = `<p class="text-xs text-gray-400 italic">Sin cumpleaños ni aniversarios en ${_AR_MONTH_NAMES[month].toLowerCase()}.</p>`;
     return;
   }
+
   el.innerHTML = events.map(e => {
-    const isBday = e.type === 'birthday';
-    const icon   = isBday ? 'cake' : 'star';
-    const color  = isBday ? 'text-[#f19ac4] bg-[#fff0f6]' : 'text-[#c9a7d4] bg-[#f5f0fa]';
-    const badge  = e.daysLeft === 0
-      ? 'bg-green-100 text-green-700 font-bold'
-      : e.daysLeft <= 3
-      ? 'bg-amber-100 text-amber-700 font-semibold'
-      : 'bg-gray-100 text-gray-500';
-    const extra = isBday ? '' : ` · ${e.years} año${e.years>1?'s':''}`;
-    return `<div class="flex items-center gap-3 p-2.5 rounded-lg bg-gray-50 border border-gray-100">
-      <div class="w-7 h-7 rounded-full ${color} flex items-center justify-center shrink-0">
-        <i data-lucide="${icon}" class="w-3.5 h-3.5"></i>
+    const isBday  = e.type === 'birthday';
+    const icon    = isBday ? 'cake' : 'star';
+    const iconClr = isBday ? 'text-[#f19ac4] bg-[#fff0f6]' : 'text-[#c9a7d4] bg-[#f5f0fa]';
+    const typeLabel = isBday ? 'Cumpleaños' : `Aniversario${e.years ? ` · ${e.years} año${e.years > 1 ? 's' : ''}` : ''}`;
+    const dayStr  = String(e.day).padStart(2, '0');
+    const monStr  = String(month + 1).padStart(2, '0');
+
+    let badge = '';
+    if (isCurrentMonth) {
+      const diff = e.day - today.getDate();
+      if (diff === 0)        badge = '<span class="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-bold shrink-0">Hoy</span>';
+      else if (diff > 0 && diff <= 3) badge = `<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold shrink-0">en ${diff} día${diff > 1 ? 's' : ''}</span>`;
+      else if (diff < 0)     badge = '<span class="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 shrink-0">Pasó</span>';
+    }
+
+    return `<div class="flex items-center gap-3 p-2.5 rounded-lg bg-gray-50 border border-gray-100${isToday(e.day) ? ' border-green-200 bg-green-50/40' : ''}">
+      <div class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex flex-col items-center justify-center shrink-0">
+        <span class="text-[11px] font-bold text-gray-800 leading-none">${dayStr}</span>
+        <span class="text-[9px] text-gray-400 leading-none uppercase">${_AR_MONTH_NAMES[month].substring(0,3)}</span>
+      </div>
+      <div class="w-6 h-6 rounded-full ${iconClr} flex items-center justify-center shrink-0">
+        <i data-lucide="${icon}" class="w-3 h-3"></i>
       </div>
       <div class="flex-1 min-w-0">
         <p class="text-sm font-semibold text-gray-800 truncate">${esc(e.name)}</p>
-        <p class="text-xs text-gray-400 truncate">${esc(e.dept)}${extra}</p>
+        <p class="text-xs text-gray-400 truncate">${esc(typeLabel)}${e.dept ? ` · ${esc(e.dept)}` : ''}</p>
       </div>
-      <span class="text-[10px] px-2 py-0.5 rounded-full shrink-0 ${badge}">${esc(e.label)}</span>
+      ${badge}
     </div>`;
   }).join('');
   lucide.createIcons();
@@ -1842,8 +2595,21 @@ function _renderArEmployees() {
   lucide.createIcons();
 }
 
+function _arFormValues() {
+  const g = id => document.getElementById(id);
+  return {
+    enabled:             String(g('ar-enabled')?.checked             ?? true),
+    birthday_enabled:    String(g('ar-birthday-enabled')?.checked    ?? true),
+    anniversary_enabled: String(g('ar-anniversary-enabled')?.checked ?? true),
+    birthday_message:    (g('ar-birthday-message')?.value?.trim()    || _AR_DEFAULTS.birthday_message),
+    anniversary_message: (g('ar-anniversary-message')?.value?.trim() || _AR_DEFAULTS.anniversary_message),
+    birthday_points:     String(parseInt(g('ar-birthday-points')?.value  || '0')),
+    anniversary_points:  String(parseInt(g('ar-anniversary-points')?.value || '0')),
+    send_time:           `${g('ar-send-hour')?.value || '09'}:${g('ar-send-minute')?.value || '00'}`,
+  };
+}
+
 async function saveAutoRecognitionSettings() {
-  // Only admins/superadmins of this company can save
   if (!currentUser || !['admin','superadmin'].includes(currentUser.role)) {
     showErrorToast('Solo administradores pueden guardar esta configuración.');
     return;
@@ -1851,32 +2617,55 @@ async function saveAutoRecognitionSettings() {
   const companyId = currentUser.company_id;
   if (!companyId || !window.autoRecognitionSdk) return;
 
-  const saveBtn = document.querySelector('[onclick="saveAutoRecognitionSettings()"]');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Guardando...'; lucide.createIcons(); }
+  const current = _arFormValues();
+
+  // Compare against the snapshot taken when the form was last loaded/saved
+  const hasChanges = !_arSnapshot ||
+    Object.keys(current).some(k => current[k] !== _arSnapshot[k]);
+
+  if (!hasChanges) {
+    const msg = document.getElementById('ar-saved-msg');
+    if (msg) {
+      msg.className = 'text-xs font-semibold text-gray-400';
+      msg.textContent = 'No se realizaron modificaciones.';
+      msg.classList.remove('hidden');
+      setTimeout(() => msg.classList.add('hidden'), 2500);
+    }
+    return;
+  }
 
   const g = id => document.getElementById(id);
   const settings = {
-    company_id:          companyId,                                           // always locked to this company
+    company_id:          companyId,
     enabled:             g('ar-enabled')?.checked             ?? true,
     birthday_enabled:    g('ar-birthday-enabled')?.checked    ?? true,
     anniversary_enabled: g('ar-anniversary-enabled')?.checked ?? true,
     birthday_message:    g('ar-birthday-message')?.value?.trim()    || _AR_DEFAULTS.birthday_message,
     anniversary_message: g('ar-anniversary-message')?.value?.trim() || _AR_DEFAULTS.anniversary_message,
-    birthday_program:    g('ar-birthday-program')?.value     || null,
-    anniversary_program: g('ar-anniversary-program')?.value  || null,
+    birthday_program:    '🎂 Cumpleaños',
+    anniversary_program: '🎉 Aniversario',
     birthday_points:     parseInt(g('ar-birthday-points')?.value  || '0'),
     anniversary_points:  parseInt(g('ar-anniversary-points')?.value || '0'),
-    send_time:           g('ar-send-time')?.value             || '09:00',
+    send_time:           `${g('ar-send-hour')?.value || '09'}:${g('ar-send-minute')?.value || '00'}`,
   };
 
-  _arSettings = settings;
+  const saveBtn = document.querySelector('[onclick="saveAutoRecognitionSettings()"]');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Guardando...'; lucide.createIcons(); }
+
+  _arSettings  = settings;
+  _arSnapshot  = current; // update snapshot so next save detects new baseline
   const res = await window.autoRecognitionSdk.saveSettings(settings);
 
   if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save" class="w-4 h-4"></i> Guardar configuración'; lucide.createIcons(); }
 
   if (res.isOk) {
     const msg = document.getElementById('ar-saved-msg');
-    if (msg) { msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000); }
+    if (msg) {
+      msg.className = 'text-xs font-semibold text-green-600';
+      msg.textContent = 'Configuración guardada ✓';
+      msg.classList.remove('hidden');
+      setTimeout(() => msg.classList.add('hidden'), 3000);
+    }
   } else {
     showErrorToast('Error al guardar. Verificá que el SQL fix_16 esté aplicado.');
   }
@@ -1967,14 +2756,150 @@ function closeAdminPage() {
   if (currentPage === 'admin') currentPage = 'home';
 }
 
+// ── Companies management (superadmin only) ────────────────────────────────────
+const COMPANY_PAGE_SIZE = 3;
+let _companiesData = [];
+let _companyPage = 0;
+
+function filterCompaniesSearch() {
+  _companyPage = 0;
+  renderCompaniesList();
+}
+
+async function loadCompanies() {
+  const { isOk, data } = await window.companySdk.list();
+  if (isOk) { _companiesData = data; _companyPage = 0; renderCompaniesList(); }
+}
+
+function renderCompaniesList() {
+  const container = document.getElementById('companies-list');
+  if (!container) return;
+
+  const searchTerm = (document.getElementById('company-search')?.value || '').toLowerCase().trim();
+  let filtered = searchTerm
+    ? _companiesData.filter(c =>
+        c.name?.toLowerCase().includes(searchTerm) ||
+        c.id?.toLowerCase().includes(searchTerm) ||
+        c.domain?.toLowerCase().includes(searchTerm))
+    : _companiesData;
+
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / COMPANY_PAGE_SIZE));
+  if (_companyPage >= totalPages) _companyPage = totalPages - 1;
+  const paged = filtered.slice(_companyPage * COMPANY_PAGE_SIZE, (_companyPage + 1) * COMPANY_PAGE_SIZE);
+
+  if (total === 0) {
+    container.innerHTML = `<p class="text-center py-6 text-gray-400 text-sm">${searchTerm ? 'Sin resultados.' : 'No hay empresas registradas.'}</p>`;
+    return;
+  }
+
+  const rows = paged.map(c => `
+    <div class="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-gray-200 bg-gray-50">
+      <div class="w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center shrink-0">
+        <i data-lucide="building-2" class="w-4 h-4 text-violet-500"></i>
+      </div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-semibold text-gray-800">${esc(c.name)}</p>
+        <p class="text-xs text-gray-400"><span class="font-mono bg-gray-100 px-1 rounded">${esc(c.id)}</span> &nbsp;·&nbsp; ${esc(c.domain)}</p>
+      </div>
+      <button onclick="deleteCompany('${esc(c.id)}')" class="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition" title="Eliminar empresa">
+        <i data-lucide="trash-2" class="w-4 h-4"></i>
+      </button>
+    </div>`).join('');
+
+  const pagination = totalPages > 1 ? `
+    <div class="flex items-center justify-between pt-3 border-t border-gray-100 mt-2">
+      <button onclick="_companyPage--;renderCompaniesList()" ${_companyPage === 0 ? 'disabled' : ''} class="flex items-center gap-1 px-3 py-1.5 text-sm font-semibold rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition">
+        <i data-lucide="chevron-left" class="w-4 h-4"></i> Anterior
+      </button>
+      <span class="text-xs text-gray-500">Página ${_companyPage + 1} de ${totalPages}</span>
+      <button onclick="_companyPage++;renderCompaniesList()" ${_companyPage >= totalPages - 1 ? 'disabled' : ''} class="flex items-center gap-1 px-3 py-1.5 text-sm font-semibold rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition">
+        Siguiente <i data-lucide="chevron-right" class="w-4 h-4"></i>
+      </button>
+    </div>` : '';
+
+  container.innerHTML = rows + pagination;
+  lucide.createIcons();
+}
+
+function toggleCreateCompanyForm() {
+  const form = document.getElementById('create-company-form');
+  const isHidden = form.classList.toggle('hidden');
+  if (!isHidden) document.getElementById('new-company-name').focus();
+}
+
+function autoFillCompanyId() {
+  const name = document.getElementById('new-company-name').value;
+  const slug = 'comp-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  document.getElementById('new-company-id').value = slug;
+}
+
+async function submitCreateCompany() {
+  const name   = document.getElementById('new-company-name').value.trim();
+  const domain = document.getElementById('new-company-domain').value.trim();
+  const id     = document.getElementById('new-company-id').value.trim();
+  if (!name || !domain || !id) { showErrorToast('Completá todos los campos'); return; }
+  if (!domain.startsWith('@')) { showErrorToast('El dominio debe comenzar con @'); return; }
+
+  const btn = document.getElementById('create-company-btn');
+  btn.disabled = true; btn.textContent = 'Creando...';
+
+  const { isOk, error } = await window.companySdk.create(id, name, domain);
+  btn.disabled = false; btn.textContent = 'Crear empresa';
+
+  if (!isOk) {
+    const msg = error?.message || error?.details || String(error) || '';
+    if (msg.includes('duplicate') || msg.includes('unique') || error?.code === '23505')
+      showErrorToast('Ya existe una empresa con ese ID.');
+    else if (msg.includes('row-level security') || msg.includes('policy') || error?.code === '42501')
+      showErrorToast('Sin permiso para crear empresas. Ejecutá fix_22 en Supabase SQL Editor.');
+    else
+      showErrorToast(`Error al crear la empresa: ${msg || 'desconocido'}`);
+    return;
+  }
+  showSuccessToast(`Empresa "${name}" creada correctamente`);
+  document.getElementById('new-company-name').value = '';
+  document.getElementById('new-company-domain').value = '';
+  document.getElementById('new-company-id').value = '';
+  document.getElementById('create-company-form').classList.add('hidden');
+  await loadCompanies();
+}
+
+async function deleteCompany(id) {
+  const company = _companiesData.find(c => c.id === id);
+  if (!company) return;
+  if (!confirm(`¿Eliminar la empresa "${company.name}"?\n\nAtención: los empleados asociados quedarán sin empresa asignada.`)) return;
+  const { isOk } = await window.companySdk.remove(id);
+  if (!isOk) { showErrorToast('No se pudo eliminar la empresa. Puede tener empleados o datos asociados.'); return; }
+  showSuccessToast(`Empresa "${company.name}" eliminada`);
+  await loadCompanies();
+}
+
 function updateAdminVisibility() {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
+  const isSA = currentUser?.role === 'superadmin';
   document.getElementById('admin-nav-link')?.classList.toggle('hidden', !isAdmin);
   document.getElementById('analytics-nav-link')?.classList.toggle('hidden', !isAdmin);
   document.getElementById('points-nav-link')?.classList.toggle('hidden', !isAdmin);
   if (isAdmin) document.getElementById('points-nav-link')?.classList.add('flex');
   else document.getElementById('points-nav-link')?.classList.remove('flex');
+  document.getElementById('superadmin-companies-section')?.classList.toggle('hidden', !isSA);
+  document.getElementById('superadmin-csv-requests-section')?.classList.toggle('hidden', !isSA);
+  const isAdminOnly = isAdmin && !isSA;
+  document.getElementById('admin-csv-history-section')?.classList.toggle('hidden', !isAdminOnly);
   document.body.classList.toggle('is-admin', isAdmin);
+
+  // Update upload button label: admin submits for approval, superadmin uploads directly
+  const uploadBtn = document.getElementById('upload-btn');
+  if (uploadBtn) {
+    if (isSA) {
+      uploadBtn.innerHTML = '<i data-lucide="upload-cloud" class="w-4 h-4"></i> Cargar empleados';
+    } else {
+      uploadBtn.innerHTML = '<i data-lucide="send" class="w-4 h-4"></i> Enviar para aprobación';
+    }
+    lucide.createIcons();
+  }
+
   updateApprovalsNavVisibility();
 }
 
@@ -1991,7 +2916,9 @@ function impersonateEmployee(empBackendId) {
     name: emp.name, email: emp.email, department: emp.department,
     company_id: emp.company_id, role: emp.role || 'employee',
     user_id: emp.email, points_to_give: emp.points_to_give,
-    points_to_redeem: emp.points_to_redeem, __backendId: emp.__backendId
+    points_to_redeem: emp.points_to_redeem, __backendId: emp.__backendId,
+    birthday: emp.birthday || null, anniversary_date: emp.anniversary_date || null,
+    auto_birthday: emp.auto_birthday ?? true, auto_anniversary: emp.auto_anniversary ?? true,
   };
 
   isImpersonating = true;
@@ -2000,12 +2927,7 @@ function impersonateEmployee(empBackendId) {
   updateImpersonationBanner();
   closeAdminPage();
 
-  const initials  = currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-  const firstName = currentUser.name.split(' ')[0];
-  const avatarDiv = document.getElementById('btn-profile')?.querySelector('div');
-  if (avatarDiv) avatarDiv.textContent = initials;
-  document.getElementById('welcome-text').textContent = `¡Hola, ${firstName}! 👋`;
-
+  updateProfileDisplay();
   updatePointsDisplay();
 
   filterEmployeesByCompany();
@@ -2045,19 +2967,13 @@ function returnToSuperadmin() {
   renderEmployeesList();
   updateImpersonationBanner();
   updateAdminVisibility();
-  const initials  = currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-  const firstName = currentUser.name.split(' ')[0];
-  const avatarDiv = document.getElementById('btn-profile')?.querySelector('div');
-  if (avatarDiv) avatarDiv.textContent = initials;
-  document.getElementById('welcome-text').textContent = `¡Hola, ${firstName}! 👋`;
+  updateProfileDisplay();
   showSuccessToast(`Volviste a tu cuenta: ${currentUser.name}`);
-  switchPage('home');
-  renderFeed(true);
-  loadHomeSidebar();
   loadNotifications();
   _setupFeedRealtime();
   renderRecognitionBattery();
   lucide.createIcons();
+  setTimeout(() => openAdmin(), 50);
 }
 
 function openModal() {
@@ -2071,8 +2987,8 @@ function openModal() {
   const sumName   = document.getElementById('sum-name');
   const sumProg   = document.getElementById('sum-program');
   const sumAvatar = document.getElementById('sum-avatar');
-  if (sumName)   sumName.textContent   = '�';
-  if (sumProg)   sumProg.textContent   = '�';
+  if (sumName)   sumName.textContent   = '–';
+  if (sumProg)   sumProg.textContent   = '–';
   if (sumAvatar) sumAvatar.textContent = '?';
 
   // Ensure next button has the span inside (may have been destroyed by finally block)
@@ -2294,6 +3210,7 @@ function showStep(n) {
   document.getElementById('modal-back').classList.toggle('hidden', n === 1);
   currentStep = n;
   updateModalBtn();
+  if (n === 3) _updatePrivacyHint();
 }
 
 function updateModalBtn() {
@@ -2339,10 +3256,7 @@ function updatePointsSlider(value) {
 }
 
 function filterPeople(q) {
-  q = q.toLowerCase();
-  document.querySelectorAll('.person-item').forEach(el => {
-    el.style.display = el.dataset.name.toLowerCase().includes(q) ? '' : 'none';
-  });
+  _renderPeopleResults(q);
 }
 
 function selectProgram(el, name) {
@@ -2389,6 +3303,38 @@ function toggleBudgetSource() {
     slider.max = 50;
     updatePointsSlider(slider.value);
   }
+}
+
+function _updatePrivacyHint() {
+  const hint     = document.getElementById('privacy-pref-hint');
+  const hintText = document.getElementById('privacy-pref-hint-text');
+  if (!hint || !hintText || !_selectedRecipients.length) { hint?.classList.add('hidden'); return; }
+
+  const preferPrivate = [];
+  const preferPublic  = [];
+
+  _selectedRecipients.forEach(r => {
+    const user = allUsers.find(u => u.__backendId === r.id);
+    if (!user) return;
+    const pref = user.recognition_visibility || 'public';
+    if (pref === 'private') preferPrivate.push(user.name.split(' ')[0]);
+    else preferPublic.push(user.name.split(' ')[0]);
+  });
+
+  if (preferPrivate.length === 0) { hint.classList.add('hidden'); return; }
+
+  let msg = '';
+  if (preferPrivate.length === _selectedRecipients.length) {
+    msg = preferPrivate.length === 1
+      ? `${preferPrivate[0]} prefiere recibir reconocimientos de forma privada.`
+      : `${preferPrivate.join(', ')} prefieren recibir reconocimientos de forma privada.`;
+  } else {
+    msg = `${preferPrivate.join(', ')} prefiere${preferPrivate.length > 1 ? 'n' : ''} recibir reconocimientos de forma privada.`;
+  }
+
+  hintText.textContent = msg;
+  hint.classList.remove('hidden');
+  if (window.lucide) lucide.createIcons({ nodes: [hint] });
 }
 
 function onPrivateToggle() {
@@ -2452,7 +3398,7 @@ async function sendRecognition() {
       if (imgOk && url) {
         baseMessage = message + '\n' + url;
       } else {
-        showErrorToast('No se pudo subir la imagen � el reconocimiento se enviará sin ella');
+        showErrorToast('No se pudo subir la imagen – el reconocimiento se enviará sin ella');
       }
     }
 
@@ -2590,7 +3536,7 @@ function _todayIndex() {
 const WEEKLY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 const WEEKLY_DAY_PHRASES = [
   'Sin días activos aún',
-  '1 día activo �xR�',
+  '1 día activo 🕑',
   '2 días activos 🌱',
   '3 días activos 🚀',
   '4 días activos 💪',
@@ -2675,7 +3621,7 @@ function selectCommentImage(input) {
   const url = URL.createObjectURL(file);
   preview.innerHTML = `<div class="relative inline-block">
     <img src="${url}" class="h-16 rounded-lg object-cover border border-gray-200">
-    <button onclick="clearCommentImage(this)" class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center leading-none">�</button>
+    <button onclick="clearCommentImage(this)" class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center leading-none">×</button>
   </div>`;
   preview.classList.remove('hidden');
 }
@@ -2689,45 +3635,42 @@ function clearCommentImage(btn) {
 }
 
 function loadMoreComments(btn) {
-  const card       = btn.closest('article');
-  const list       = card.querySelector('.comments-list');
-  const all        = JSON.parse(card.dataset.allComments || '[]');
-  const shown      = parseInt(card.dataset.shownComments || '0');
-  const STEP       = 3;
-  const next       = all.slice(shown, shown + STEP);
+  const card   = btn.closest('article');
+  const list   = card.querySelector('.comments-list');
+  const all    = JSON.parse(card.dataset.allComments || '[]');
+  const shown  = parseInt(card.dataset.shownComments || '0');
+  const rest   = all.slice(shown);
 
-  next.forEach(c => {
-    const ci   = esc((c.user?.name || '?').split(' ').map(n => n[0]).join('').substring(0, 1).toUpperCase());
-    const time = c.created_at ? formatTimeAgo(c.created_at) : '';
+  rest.forEach(c => {
+    const ci      = esc((c.user?.name || '?').split(' ').map(n => n[0]).join('').substring(0, 1).toUpperCase());
+    const time    = c.created_at ? formatTimeAgo(c.created_at) : '';
+    const isOwner = c.user?.id && currentUser?.__backendId && c.user.id === currentUser.__backendId;
     const div  = document.createElement('div');
     div.className = 'flex items-start gap-2.5';
+    if (c.id) div.dataset.commentId = c.id;
     div.innerHTML = `
       <div class="w-7 h-7 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">${ci}</div>
       <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1">
         <div class="flex items-center justify-between gap-2">
           <p class="text-xs font-semibold text-gray-700">${esc(c.user?.name || 'Usuario')}</p>
-          ${time ? `<span class="text-[10px] text-gray-400 shrink-0">${time}</span>` : ''}
+          <div class="flex items-center gap-1.5 shrink-0">
+            ${time ? `<span class="text-[10px] text-gray-400">${time}</span>` : ''}
+            ${isOwner && c.id ? `<button onclick="deleteComment('${esc(c.id)}',this)" class="text-gray-300 hover:text-red-400 transition" title="Eliminar comentario"><i data-lucide="x" class="w-3 h-3"></i></button>` : ''}
+          </div>
         </div>
         ${(() => { const { text, imgs } = parseCommentMessage(c.message); return (text ? `<p class="text-xs text-gray-600 mt-0.5">${esc(text)}</p>` : '') + imgs.map(u => `<img src="${esc(u)}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">`).join(''); })()}
       </div>`;
     list.appendChild(div);
   });
 
-  const newShown   = shown + next.length;
-  card.dataset.shownComments = newShown;
-  const remaining  = all.length - newShown;
-
-  if (remaining > 0) {
-    btn.textContent = `Ver ${Math.min(remaining, STEP)} comentarios más`;
-  } else {
-    btn.textContent = 'Ver menos comentarios';
-    btn.setAttribute('onclick', 'loadLessComments(this)');
-  }
+  card.dataset.shownComments = all.length;
+  btn.innerHTML = '<i data-lucide="chevron-up" class="w-3 h-3"></i> Colapsar';
+  btn.setAttribute('onclick', 'loadLessComments(this)');
+  if (window.lucide) lucide.createIcons({ nodes: [btn] });
 }
 
 function loadLessComments(btn) {
-  const INIT = 2;
-  const STEP = 3;
+  const INIT  = 3;
   const card  = btn.closest('article');
   const list  = card.querySelector('.comments-list');
   const all   = JSON.parse(card.dataset.allComments || '[]');
@@ -2738,16 +3681,55 @@ function loadLessComments(btn) {
   }
 
   card.dataset.shownComments = INIT;
-  const remaining = all.length - INIT;
-
-  btn.textContent = `Ver ${Math.min(remaining, STEP)} comentarios más`;
+  const hidden = all.length - INIT;
+  btn.innerHTML = `<i data-lucide="chevron-down" class="w-3 h-3"></i> Ver ${hidden} comentario${hidden !== 1 ? 's' : ''} más`;
   btn.setAttribute('onclick', 'loadMoreComments(this)');
+  if (window.lucide) lucide.createIcons({ nodes: [btn] });
+}
+
+async function deleteComment(commentId, btn) {
+  const commentEl = btn.closest('[data-comment-id], .flex.items-start');
+  const card      = btn.closest('article');
+
+  // Optimistic removal
+  if (commentEl) commentEl.remove();
+
+  // Update counters and dataset
+  if (card) {
+    const countSpan = card.querySelector('.comment-count');
+    if (countSpan) countSpan.textContent = Math.max(0, (parseInt(countSpan.textContent) || 1) - 1);
+
+    const allC = JSON.parse(card.dataset.allComments || '[]');
+    const idx  = commentId ? allC.findIndex(c => c.id === commentId) : -1;
+    if (idx !== -1) allC.splice(idx, 1);
+    card.dataset.allComments  = JSON.stringify(allC);
+    const shownNow = card.querySelectorAll('.comments-list > div').length;
+    card.dataset.shownComments = shownNow;
+
+    // If shown ≤ COMMENTS_INITIAL, hide or update the collapse button
+    const CINIT  = 3;
+    const verBtn = card.querySelector('.ver-mas-comments');
+    if (verBtn) {
+      const hidden = allC.length - shownNow;
+      if (allC.length <= CINIT) {
+        verBtn.remove();
+      } else if (hidden > 0) {
+        verBtn.innerHTML = `<i data-lucide="chevron-down" class="w-3 h-3"></i> Ver ${hidden} comentario${hidden !== 1 ? 's' : ''} más`;
+        verBtn.setAttribute('onclick', 'loadMoreComments(this)');
+        if (window.lucide) lucide.createIcons({ nodes: [verBtn] });
+      }
+    }
+  }
+
+  if (!commentId || !window.recognitionSdk?.deleteComment) return;
+  const { isOk } = await window.recognitionSdk.deleteComment(commentId);
+  if (!isOk) showErrorToast('No se pudo eliminar el comentario');
 }
 
 async function addComment(btn) {
   const card       = btn.closest('article');
-  const input      = card.querySelector('input[placeholder="Escribí un comentario..."]');
-  const text       = input.value.trim();
+  const input      = card.querySelector('.comment-editable');
+  const text       = (input?.innerText || input?.textContent || '').trim();
   const fileInput  = card.querySelector('input[type="file"]');
   const file       = fileInput?.files[0] || null;
 
@@ -2772,14 +3754,65 @@ async function addComment(btn) {
     <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1">
       <div class="flex items-center justify-between gap-2">
         <p class="text-xs font-semibold text-gray-700">${esc(currentUser.name)}</p>
-        <span class="text-[10px] text-gray-400 shrink-0">Ahora</span>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <span class="text-[10px] text-gray-400">Ahora</span>
+          <button onclick="deleteComment(null,this)" class="text-gray-300 hover:text-red-400 transition" title="Eliminar comentario"><i data-lucide="x" class="w-3 h-3"></i></button>
+        </div>
       </div>
       ${text ? `<p class="text-xs text-gray-600 mt-0.5">${esc(text)}</p>` : ''}
       ${localImgUrl ? `<img src="${esc(localImgUrl)}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">` : ''}
     </div>`;
   container.appendChild(newComment);
 
-  input.value = '';
+  // Once the server returns the real comment id, attach it to the DOM node
+  (async () => {
+    const recognitionId = card.dataset.recognitionId;
+    if (!recognitionId) return;
+    let remoteImgUrl = null;
+    if (file && window.storageSdk) {
+      const result = await window.storageSdk.uploadCommentImage(file);
+      if (result.isOk) remoteImgUrl = result.url;
+    }
+    const fullMessage = [text, remoteImgUrl].filter(Boolean).join('\n');
+    if (fullMessage) {
+      const { data } = await window.recognitionSdk.addComment(recognitionId, currentUser.__backendId, fullMessage);
+      if (data?.id) {
+        newComment.dataset.commentId = data.id;
+        const delBtn = newComment.querySelector('button[onclick*="deleteComment"]');
+        if (delBtn) delBtn.setAttribute('onclick', `deleteComment('${data.id}',this)`);
+        const allC2 = JSON.parse(card.dataset.allComments || '[]');
+        const last = allC2[allC2.length - 1];
+        if (last && !last.id) { last.id = data.id; last.user = { id: currentUser.__backendId, name: currentUser.name }; }
+        card.dataset.allComments = JSON.stringify(allC2);
+      }
+    }
+  })();
+
+
+  // Keep allComments dataset in sync so collapse/expand stays consistent
+  const allC = JSON.parse(card.dataset.allComments || '[]');
+  allC.push({ user: { name: currentUser.name }, message: text || '', created_at: new Date().toISOString() });
+  card.dataset.allComments = JSON.stringify(allC);
+  const newShown = (parseInt(card.dataset.shownComments || '0') || 0) + 1;
+  card.dataset.shownComments = newShown;
+
+  // If now more than 3 visible, show/update the collapse button
+  const CINIT = 3;
+  if (newShown > CINIT) {
+    const verMasBtn = card.querySelector('.ver-mas-comments');
+    if (verMasBtn) {
+      verMasBtn.innerHTML = '<i data-lucide="chevron-up" class="w-3 h-3"></i> Colapsar';
+      verMasBtn.setAttribute('onclick', 'loadLessComments(this)');
+    } else {
+      const collapseBtn = document.createElement('button');
+      collapseBtn.className = 'ver-mas-comments text-xs text-violet-500 hover:text-violet-700 font-medium px-4 pb-2 transition flex items-center gap-1';
+      collapseBtn.setAttribute('onclick', 'loadLessComments(this)');
+      collapseBtn.innerHTML = '<i data-lucide="chevron-up" class="w-3 h-3"></i> Colapsar';
+      container.after(collapseBtn);
+    }
+  }
+
+  if (input) input.innerHTML = '';
   if (fileInput) fileInput.value = '';
   const preview = card.querySelector('.comment-img-preview');
   if (preview) { preview.innerHTML = ''; preview.classList.add('hidden'); }
@@ -2796,17 +3829,6 @@ async function addComment(btn) {
   const countSpan = card.querySelector('.comment-count');
   if (countSpan) countSpan.textContent = (parseInt(countSpan.textContent) || 0) + 1;
   lucide.createIcons();
-
-  const recognitionId = card.dataset.recognitionId;
-  if (recognitionId) {
-    let remoteImgUrl = null;
-    if (file && window.storageSdk) {
-      const result = await window.storageSdk.uploadCommentImage(file);
-      if (result.isOk) remoteImgUrl = result.url;
-    }
-    const fullMessage = [text, remoteImgUrl].filter(Boolean).join('\n');
-    if (fullMessage) window.recognitionSdk.addComment(recognitionId, currentUser.__backendId, fullMessage);
-  }
 }
 
 function switchPage(page) {
@@ -2999,18 +4021,21 @@ function _canViewRecognition(rec) {
 }
 
 function buildFeedCard(rec) {
-  const senderName  = rec.from_user?.name || 'Alguien';
-  const initials    = esc(senderName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2));
-  const avatarColor = AVATAR_COLORS[senderName.length % AVATAR_COLORS.length];
-  const gradient    = PROGRAM_COLORS[rec.program] || 'bg-[#3d2b56]';
-  const programData = _getProgramByLabel(rec.program);
+  const senderName     = rec.from_user?.name || rec.from_user_name || 'Desconocido';
+  const senderInactive = !rec.from_user && !!rec.from_user_name;
+  const initials       = esc(senderName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2));
+  const avatarColor    = rec.from_user ? AVATAR_COLORS[senderName.length % AVATAR_COLORS.length] : 'bg-gray-300';
+  const gradient       = PROGRAM_COLORS[rec.program] || 'bg-[#3d2b56]';
+  const programData    = _getProgramByLabel(rec.program);
 
   // Parse multi-recipient group marker
   const groupData = _parseGroupMarker(rec.message);
   const rawMessage   = _cleanPrivateMarker(rec.message || '');
   const groupIdx    = rawMessage ? rawMessage.indexOf('\n' + _GROUP_PREFIX) : -1;
   const cleanMessage = groupIdx !== -1 ? rawMessage.slice(0, groupIdx) : rawMessage;
-  const recipientNames = groupData?.recipients?.map(r => r.name) || [rec.to_user?.name || 'Alguien'];
+  const toName = rec.to_user?.name || rec.to_user_name || 'Desconocido';
+  const toInactive = !rec.to_user && !!rec.to_user_name;
+  const recipientNames = groupData?.recipients?.map(r => r.name) || [toName];
   const recipientDisplay = recipientNames.length === 1
     ? recipientNames[0]
     : recipientNames.length === 2
@@ -3031,21 +4056,24 @@ function buildFeedCard(rec) {
     return `<button class="reaction-btn ${d.mine ? 'reacted' : ''} flex items-center gap-1.5 text-sm text-gray-500 ${hover} transition" style="${d.mine ? 'font-weight:700' : ''}" onclick="toggleReaction(this,'${emoji}')"><span class="text-base">${emoji}</span><span class="count">${d.count}</span></button>`;
   };
 
-  const COMMENTS_INITIAL = 2;
-  const COMMENTS_STEP    = 3;
+  const COMMENTS_INITIAL = 3;
   const allComments      = rec.comments || [];
 
   const buildCommentHtml = (c) => {
-    const ci   = esc((c.user?.name || '?').split(' ').map(n => n[0]).join('').substring(0, 1).toUpperCase());
-    const time = c.created_at ? formatTimeAgo(c.created_at) : '';
+    const ci      = esc((c.user?.name || '?').split(' ').map(n => n[0]).join('').substring(0, 1).toUpperCase());
+    const time    = c.created_at ? formatTimeAgo(c.created_at) : '';
+    const isOwner = c.user?.id && currentUser?.__backendId && c.user.id === currentUser.__backendId;
     const { text: msgText, imgs } = parseCommentMessage(c.message);
     const imgHtml = imgs.map(u => `<img src="${esc(u)}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">`).join('');
-    return `<div class="flex items-start gap-2.5">
+    return `<div class="flex items-start gap-2.5" data-comment-id="${esc(c.id || '')}">
       <div class="w-7 h-7 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">${ci}</div>
       <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1">
         <div class="flex items-center justify-between gap-2">
           <p class="text-xs font-semibold text-gray-700">${esc(c.user?.name || 'Usuario')}</p>
-          ${time ? `<span class="text-[10px] text-gray-400 shrink-0">${time}</span>` : ''}
+          <div class="flex items-center gap-1.5 shrink-0">
+            ${time ? `<span class="text-[10px] text-gray-400">${time}</span>` : ''}
+            ${isOwner && c.id ? `<button onclick="deleteComment('${esc(c.id)}',this)" class="text-gray-300 hover:text-red-400 transition" title="Eliminar comentario"><i data-lucide="x" class="w-3 h-3"></i></button>` : ''}
+          </div>
         </div>
         ${msgText ? `<p class="text-xs text-gray-600 mt-0.5">${esc(msgText)}</p>` : ''}
         ${imgHtml}
@@ -3057,13 +4085,14 @@ function buildFeedCard(rec) {
   const hiddenCount      = allComments.length - visibleComments.length;
   const commentsHtml     = visibleComments.map(buildCommentHtml).join('');
   const verMasHtml       = hiddenCount > 0
-    ? `<button class="ver-mas-comments text-xs text-violet-500 hover:text-violet-700 font-medium px-4 pb-2 transition" onclick="loadMoreComments(this)">Ver ${Math.min(hiddenCount, COMMENTS_STEP)} comentarios más</button>`
+    ? `<button class="ver-mas-comments text-xs text-violet-500 hover:text-violet-700 font-medium px-4 pb-2 transition flex items-center gap-1" onclick="loadMoreComments(this)"><i data-lucide="chevron-down" class="w-3 h-3"></i> Ver ${hiddenCount} comentario${hiddenCount !== 1 ? 's' : ''} más</button>`
     : '';
 
   const card = document.createElement('article');
   card.className = 'feed-card bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition';
   card.style.animation = 'slideUp 0.4s ease both';
   card.dataset.recognitionId = rec.id;
+  card.dataset.recId = rec.id;
   card.dataset.allComments   = JSON.stringify(allComments);
   card.dataset.shownComments = visibleComments.length;
   const bannerHtml = programData?.image
@@ -3087,20 +4116,20 @@ function buildFeedCard(rec) {
       <div class="flex items-start gap-3 mb-3">
         <div class="w-10 h-10 rounded-full ${avatarColor} flex items-center justify-center text-white font-bold shrink-0">${initials}</div>
         <div class="flex-1 min-w-0">
-          <p class="text-sm"><span class="font-bold text-gray-800">${esc(senderName)}</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">${esc(recipientDisplay)}</span></p>
-          <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> ${formatTimeAgo(rec.created_at)} · <span class="text-violet-500 font-medium">${esc(rec.program)}</span></p>
+          <p class="text-sm"><span class="font-bold text-gray-800">${esc(senderName)}</span>${senderInactive ? ' <span class="text-[10px] font-semibold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full align-middle">inactivo</span>' : ''} <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">${esc(toInactive ? toName : recipientDisplay)}</span>${toInactive ? ' <span class="text-[10px] font-semibold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full align-middle">inactivo</span>' : ''}</p>
+          <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1 flex-wrap"><i data-lucide="clock" class="w-3 h-3 shrink-0"></i> ${formatTimeAgo(rec.created_at)} · <span class="text-violet-500 font-medium">${esc(rec.program)}</span>${programData?.tag ? `<span class="text-[10px] font-semibold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">#${esc(programData.tag)}</span>` : ''}</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           ${_isPrivateRec(rec) ? `<span class="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200"><svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> Privado</span>` : ''}
           ${pointsBadgeHtml2}
-          <div class="feed-admin-menu relative">
+          ${currentUser?.role === 'superadmin' ? `<div class="feed-admin-menu relative">
             <button onclick="toggleFeedMenu(event,'${rec.id}')" class="p-1 rounded-lg hover:bg-gray-100 transition text-gray-400 hover:text-gray-600 font-bold text-base leading-none">···</button>
             <div id="feedmenu-${rec.id}" class="hidden absolute right-0 top-7 bg-white border border-gray-100 rounded-xl shadow-lg py-1 min-w-[140px] z-10">
               <button onclick="openDeleteRecognitionModal('${rec.id}')" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left">
-                �x️ Eliminar
+                <i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i> Eliminar
               </button>
             </div>
-          </div>
+          </div>` : ''}
         </div>
       </div>
       ${recogImgHtml}<p class="text-sm text-gray-700 leading-relaxed">${esc(msgText || '')}</p>
@@ -3121,14 +4150,19 @@ function buildFeedCard(rec) {
           <input type="file" accept="image/*" class="hidden" onchange="selectCommentImage(this)">
           <i data-lucide="image" class="w-4 h-4"></i>
         </label>
-        <input type="text" placeholder="Escribí un comentario..." class="flex-1 text-xs bg-gray-50 border border-gray-200 rounded-full px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300" onkeydown="if(event.key==='Enter')addComment(this.closest('.comments-section').querySelector('button[onclick]'))">
-        <button class="p-2 rounded-full bg-violet-500 text-white hover:bg-violet-600 transition shrink-0" onclick="addComment(this)"><i data-lucide="send" class="w-3.5 h-3.5"></i></button>
+        <div contenteditable="true" data-placeholder="Escribí un comentario..." class="comment-editable flex-1 text-xs bg-gray-50 border border-gray-200 rounded-full px-3 py-2 focus:ring-2 focus:ring-violet-300 cursor-text overflow-hidden" onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.comments-section').querySelector('.comment-send-btn').click();}"></div>
+        <button class="comment-send-btn p-2 rounded-full bg-violet-500 text-white hover:bg-violet-600 transition shrink-0" onclick="addComment(this)"><i data-lucide="send" class="w-3.5 h-3.5"></i></button>
       </div>
     </div>`;
   return card;
 }
 
 // ------------------------------------------------------------
+
+function isSuperadmin() {
+  return currentUser?.role === 'superadmin';
+}
+
 
 function toggleFeedMenu(e, id) {
   if (!isSuperadmin()) return;
@@ -3210,7 +4244,7 @@ async function renderFeed(reset = true) {
 
   window._allRecognitions = (window._allRecognitions || []).concat(data);
   if (data.length === 0 && feedOffset === 0) {
-    container.innerHTML = '<p class="text-sm text-gray-400 text-center py-8">¡Sé el primero en reconocer a alguien! �xRx</p>';
+    container.innerHTML = '<p class="text-sm text-gray-400 text-center py-8">¡Sé el primero en reconocer a alguien! 🎉</p>';
     return;
   }
 
@@ -3267,7 +4301,7 @@ function renderNotificationsDropdown() {
     return;
   }
   list.innerHTML = recent.map(n => {
-    const fromName = allUsers.find(u => u.__backendId === n.data?.from_user_id)?.name || 'Alguien';
+    const fromName = allUsers.find(u => u.__backendId === n.data?.from_user_id)?.name || 'Usuario eliminado';
     let icon, iconColor, text;
     if (n.type === 'recognition') {
       icon = 'heart'; iconColor = 'rose';
@@ -3284,11 +4318,20 @@ function renderNotificationsDropdown() {
     } else if (n.type === 'program_rejected') {
       icon = 'x-circle'; iconColor = 'red';
       text = `${n.data?.program_emoji || '🏆'} Tu solicitud de <strong>${esc(n.data?.program_name)}</strong> fue rechazada`;
+    } else if (n.type === 'csv_request') {
+      icon = 'file-up'; iconColor = 'amber';
+      text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó cargar <strong>${n.data?.row_count || '?'} empleados</strong> (${esc(n.data?.file_name || 'CSV')})`;
+    } else if (n.type === 'csv_approved') {
+      icon = 'file-check'; iconColor = 'green';
+      text = `Tu CSV <strong>${esc(n.data?.file_name || 'archivo')}</strong> fue aprobado — ${n.data?.ok_count || 0} empleados creados`;
+    } else if (n.type === 'csv_rejected') {
+      icon = 'file-x'; iconColor = 'red';
+      text = `Tu CSV <strong>${esc(n.data?.file_name || 'archivo')}</strong> fue rechazado`;
     } else {
       icon = 'message-circle'; iconColor = 'blue';
       text = `<span class="font-semibold">${esc(fromName)}</span> comentó en tu reconocimiento`;
     }
-    return `<div class="notif-item p-3 rounded-lg ${n.read ? '' : 'bg-violet-50'} hover:bg-gray-50 cursor-pointer transition border border-transparent hover:border-gray-200" onclick="handleNotificationClick(${JSON.stringify(n.id)})">
+    return `<div class="notif-item p-3 rounded-lg ${n.read ? '' : 'bg-violet-50'} hover:bg-gray-50 cursor-pointer transition border border-transparent hover:border-gray-200" onclick='handleNotificationClick(${JSON.stringify(n.id)})'>
       <div class="flex items-start gap-2.5">
         <div class="w-8 h-8 rounded-full bg-${iconColor}-100 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="${icon}" class="w-4 h-4 text-${iconColor}-500"></i></div>
         <div class="min-w-0 flex-1"><p class="text-xs text-gray-700">${text}</p><p class="text-[11px] text-gray-400 mt-0.5">${formatTimeAgo(n.created_at)}</p></div>
@@ -3311,7 +4354,7 @@ function renderNotificationsPage() {
   }
 
   container.innerHTML = filtered.map(n => {
-    const fromName = allUsers.find(u => u.__backendId === n.data?.from_user_id)?.name || 'Alguien';
+    const fromName = allUsers.find(u => u.__backendId === n.data?.from_user_id)?.name || 'Usuario eliminado';
     const unread = !n.read ? 'border-violet-300 bg-violet-50' : 'border-gray-200 bg-white';
     let avatarContent, text;
     if (n.type === 'recognition') {
@@ -3329,74 +4372,106 @@ function renderNotificationsPage() {
     } else if (n.type === 'program_rejected') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="x-circle" class="w-5 h-5 text-red-500"></i></div>`;
       text = `${n.data?.program_emoji || '🏆'} Tu solicitud del ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${esc(n.data?.program_name)}</strong> fue rechazada por <span class="font-semibold">${esc(n.data?.rejected_by)}</span>`;
+    } else if (n.type === 'csv_request') {
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0"><i data-lucide="file-up" class="w-5 h-5 text-amber-500"></i></div>`;
+      text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó cargar <strong>${n.data?.row_count || '?'} empleados</strong> · ${esc(n.data?.file_name || 'CSV')} · ${esc(n.data?.company_id || '')}`;
+    } else if (n.type === 'csv_approved') {
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0"><i data-lucide="file-check" class="w-5 h-5 text-green-500"></i></div>`;
+      text = `Tu CSV <strong>${esc(n.data?.file_name || 'archivo')}</strong> fue aprobado — <strong>${n.data?.ok_count || 0}</strong> empleados creados${n.data?.fail_count > 0 ? `, ${n.data.fail_count} con errores` : ''}`;
+    } else if (n.type === 'csv_rejected') {
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="file-x" class="w-5 h-5 text-red-500"></i></div>`;
+      text = `Tu CSV <strong>${esc(n.data?.file_name || 'archivo')}</strong> fue rechazado${n.data?.rejection_reason ? ` · <em>${esc(n.data.rejection_reason)}</em>` : ''}`;
     } else {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${esc((fromName[0] || '?').toUpperCase())}</div>`;
       text = `<span class="font-semibold">${esc(fromName)}</span> comentó en tu reconocimiento`;
     }
-    return `<div class="p-4 rounded-xl border ${unread} hover:shadow-md transition cursor-pointer group" onclick="handleNotificationClick(${JSON.stringify(n.id)})">
+    const idJson = JSON.stringify(n.id);
+    return `<div class="p-4 rounded-xl border ${unread} hover:shadow-md transition group">
       <div class="flex items-start gap-3">
         ${avatarContent}
-        <div class="flex-1 min-w-0"><p class="text-sm text-gray-800">${text}</p><p class="text-xs text-gray-400 mt-1"><i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${formatTimeAgo(n.created_at)}</p></div>
-        <button onclick="event.stopPropagation(); deleteNotification(${JSON.stringify(n.id)})" class="p-2 rounded-lg hover:bg-red-50 transition"><i data-lucide="trash-2" class="w-4 h-4 text-gray-400 hover:text-red-500"></i></button>
+        <div class="flex-1 min-w-0 cursor-pointer" onclick='handleNotificationClick(${idJson})'>
+          <p class="text-sm text-gray-800">${text}</p>
+          <p class="text-xs text-gray-400 mt-1"><i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${formatTimeAgo(n.created_at)}</p>
+        </div>
+        <div class="flex gap-1 shrink-0">
+          ${!n.read ? `<button onclick='event.stopPropagation(); markNotificationRead(${idJson})' class="p-1.5 rounded-lg hover:bg-violet-100 transition" title="Marcar como leída"><i data-lucide="check" class="w-3.5 h-3.5 text-violet-500"></i></button>` : ''}
+          <button onclick='event.stopPropagation(); handleNotificationClick(${idJson})' class="p-1.5 rounded-lg hover:bg-gray-100 transition" title="Ir al contenido"><i data-lucide="arrow-right" class="w-3.5 h-3.5 text-gray-400"></i></button>
+        </div>
       </div>
     </div>`;
   }).join('');
   lucide.createIcons();
 }
 
-async function markNotificationRead(id) {
-  await window.notificationSdk.markRead(id);
-  const n = _notificationsData.find(n => n.id === id);
-  if (n) n.read = true;
-  updateNotificationBadge();
-  renderNotificationsPage();
-  renderNotificationsDropdown();
+function closeRecognitionModal() {
+  document.getElementById('recognition-detail-modal').classList.add('hidden');
+}
+
+async function openRecognitionModal(recognitionId) {
+  const modal = document.getElementById('recognition-detail-modal');
+  const content = document.getElementById('recognition-detail-content');
+  content.innerHTML = `<div class="bg-white rounded-2xl p-8 flex items-center justify-center"><i data-lucide="loader-2" class="w-6 h-6 text-violet-400 animate-spin"></i></div>`;
+  modal.classList.remove('hidden');
+  lucide.createIcons();
+
+  const { isOk, data: rec } = await window.recognitionSdk.getById(recognitionId);
+  if (!isOk || !rec) {
+    content.innerHTML = `<div class="bg-white rounded-2xl p-8 text-center text-gray-400 text-sm">No se pudo cargar el reconocimiento.</div>`;
+    return;
+  }
+  const card = buildFeedCard(rec);
+  card.style.animation = '';
+  content.innerHTML = '';
+  content.appendChild(card);
+  lucide.createIcons();
 }
 
 async function handleNotificationClick(id) {
-  await window.notificationSdk.markRead(id);
   const n = _notificationsData.find(n => n.id === id);
-  if (n) n.read = true;
-  updateNotificationBadge();
-  renderNotificationsDropdown();
 
-  // Close notifications panel/page
+  // Marcar como leída
+  if (n && !n.read) {
+    n.read = true;
+    updateNotificationBadge();
+    renderNotificationsDropdown();
+    renderNotificationsPage();
+    window.notificationSdk.markRead(id);
+  }
+
+  // Cerrar dropdown y página
   document.getElementById('notifications-dropdown')?.classList.add('hidden');
   closeNotificationsPage();
 
-  // Navigate based on type
-  if (n?.type === 'program_approval_request') {
-    sidebarNav(() => switchPage('approvals'));
-  } else if (n?.type === 'program_approved' || n?.type === 'program_rejected') {
-    sidebarNav(() => switchPage('programs'));
-  } else if (n?.type === 'recognition' || n?.type === 'reaction' || n?.type === 'comment') {
-    sidebarNav(() => switchPage('feed'));
-  } else {
-    renderNotificationsPage();
+  if (!n) return;
+
+  // Navegar al contenido correspondiente
+  if (n.type === 'program_approval_request') {
+    _closeAllOverlays();
+    openApprovalsPage();
+  } else if (n.type === 'program_approved' || n.type === 'program_rejected') {
+    _closeAllOverlays();
+    openProgramsPage();
+  } else if (n.type === 'recognition' || n.type === 'reaction' || n.type === 'comment') {
+    const recId = n.data?.recognition_id;
+    if (recId) {
+      openRecognitionModal(recId);
+    }
+  } else if (n.type === 'csv_request' || n.type === 'csv_approved' || n.type === 'csv_rejected') {
+    _closeAllOverlays();
+    openAdmin();
+    if (n.type === 'csv_request') {
+      setTimeout(() => { setCsvRequestTab('pending'); }, 300);
+    } else if (n.type === 'csv_approved' || n.type === 'csv_rejected') {
+      setTimeout(() => {
+        const body = document.getElementById('admin-csv-history-body');
+        const chevron = document.getElementById('admin-csv-history-chevron');
+        if (body && body.classList.contains('hidden')) {
+          body.classList.remove('hidden');
+          if (chevron) chevron.style.transform = 'rotate(180deg)';
+        }
+      }, 300);
+    }
   }
-}
-
-async function deleteNotification(id) {
-  await window.notificationSdk.remove(id);
-  _notificationsData = _notificationsData.filter(n => n.id !== id);
-  updateNotificationBadge();
-  renderNotificationsPage();
-  renderNotificationsDropdown();
-  showSuccessToast('Notificación eliminada');
-}
-
-async function markAllAsRead() {
-  await window.notificationSdk.markAllRead();
-  _notificationsData.forEach(n => n.read = true);
-  updateNotificationBadge();
-  renderNotificationsPage();
-  renderNotificationsDropdown();
-  showSuccessToast('Todas las notificaciones marcadas como leídas');
-}
-
-function updateNotificationBadge() {
-  const unread = _notificationsData.filter(n => !n.read).length;
-  document.getElementById('btn-notif')?.classList.toggle('notification-dot', unread > 0);
 }
 
 async function openStore() {
@@ -3525,7 +4600,7 @@ function buildStoreRewardCard(r, userPts, isPlaceholder) {
           <span class="text-xs text-gray-400">pts</span>
         </div>
         ${!isPlaceholder && !canAfford  ? `<p class="text-[10px] text-pink-500 font-medium mt-0.5">Te faltan ${missing} pts</p>` : ''}
-        ${!isPlaceholder &&  canAfford  ? `<p class="text-[10px] text-emerald-500 font-medium mt-0.5">Podés canjear esto �S</p>` : ''}
+        ${!isPlaceholder &&  canAfford  ? `<p class="text-[10px] text-emerald-500 font-medium mt-0.5">Podés canjear esto ✓</p>` : ''}
       </div>
       <button ${!isPlaceholder && canAfford ? `onclick="redeemReward('${id}', '${name}', ${cost})"` : 'disabled'}
         class="px-4 py-1.5 rounded-full text-xs font-bold transition ${!isPlaceholder && canAfford ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}">
@@ -3556,18 +4631,21 @@ async function redeemReward(rewardId, name, cost) {
 }
 
 const DEFAULT_PROGRAMS = [
-  { id: 'p1', emoji: '🏆', name: 'Trabajo en Equipo',        active: true },
-  { id: 'p2', emoji: '🎯', name: 'Liderazgo',                active: true },
-  { id: 'p3', emoji: '💡', name: 'Innovación',               active: true },
-  { id: 'p4', emoji: '🤝', name: 'Colaboración',             active: true },
-  { id: 'p5', emoji: '⭐', name: 'Actitud',                  active: true },
-  { id: 'p6', emoji: '✅', name: 'Cumplimiento de objetivos', active: true },
+  { id: 'p1', emoji: '🏆', name: 'Trabajo en Equipo',        active: true, global: true },
+  { id: 'p2', emoji: '🎯', name: 'Liderazgo',                active: true, global: true },
+  { id: 'p3', emoji: '💡', name: 'Innovación',               active: true, global: true },
+  { id: 'p4', emoji: '🤝', name: 'Colaboración',             active: true, global: true },
+  { id: 'p5', emoji: '⭐', name: 'Actitud',                  active: true, global: true },
+  { id: 'p6', emoji: '✅', name: 'Cumplimiento de objetivos', active: true, global: true },
+  { id: 'global-birthday',    emoji: '🎂', name: 'Cumpleaños',  active: true, global: true },
+  { id: 'global-anniversary', emoji: '🎉', name: 'Aniversario', active: true, global: true },
 ];
 
 let companyPrograms = [...DEFAULT_PROGRAMS];
 
 async function loadCompanyPrograms() {
   companyPrograms = [...DEFAULT_PROGRAMS];
+  _loadGlobalOverrides();
   _loadCustomPrograms();
   renderProgramsInModal();
   renderHomeProgramsWidget();
@@ -3710,7 +4788,7 @@ function _submitProgramApprovalRequest(programData, budget, rechargeFor = null) 
       data:    {
         requester_name: name,
         program_name:   programData.name,
-        program_emoji:  programData.emoji || '�x� ',
+        program_emoji:  programData.emoji || '⭐ ',
         points:         budget,
         is_recharge:    !!rechargeFor,
         req_id:         req.id,
@@ -3963,7 +5041,7 @@ function approveRequest(reqId) {
       type:    'program_approved',
       data:    {
         program_name:  req.programName,
-        program_emoji: req.programEmoji || '�x� ',
+        program_emoji: req.programEmoji || '⭐ ',
         points:        req.points,
         is_recharge:   !!req.rechargeFor,
         approved_by:   currentUser?.name || 'Admin',
@@ -4006,7 +5084,7 @@ function rejectRequest(reqId) {
       type:    'program_rejected',
       data:    {
         program_name:  req.programName,
-        program_emoji: req.programEmoji || '�x� ',
+        program_emoji: req.programEmoji || '⭐ ',
         points:        req.points,
         is_recharge:   !!req.rechargeFor,
         rejected_by:   currentUser?.name || 'Admin',
@@ -4052,28 +5130,42 @@ function renderProgramsPage() {
     return;
   }
 
+  const isSuperadmin = currentUser?.role === 'superadmin';
   const activeCards = active.map(p => {
     const remaining = _getProgramRemainingBudget(p);
     return `
     <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col items-center gap-3 text-center hover:shadow-md transition relative">
       ${p.custom ? `
         <div class="absolute top-3 right-3" style="z-index:2;">
-          <button onclick="toggleProgramMenu(event,'${p.id}')"
+          <button onclick="toggleProgramMenu('${p.id}',event)"
             class="p-1.5 rounded-lg hover:bg-gray-100 transition text-gray-500 hover:text-gray-700 font-bold text-base leading-none">
             ···
           </button>
           <div id="pmenu-${p.id}" class="hidden absolute right-0 top-8 bg-white border border-gray-100 rounded-xl shadow-lg py-1 min-w-[150px]">
             <button onclick="openProgramHistory('${p.id}'); closeProgramMenus()"
               class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left">
-              �x9 Historial
+              <i data-lucide="clock" class="w-3.5 h-3.5 shrink-0"></i> Historial
             </button>
             <button onclick="openEditProgramModal('${p.id}'); closeProgramMenus()"
               class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left">
-              �S�️ Editar
+              <i data-lucide="pencil" class="w-3.5 h-3.5 shrink-0"></i> Editar
             </button>
             <button onclick="openDeleteProgramModal('${p.id}','${p.name.replace(/'/g,"\\'")}'); closeProgramMenus()"
               class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left">
-              �x️ Eliminar
+              <i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i> Eliminar
+            </button>
+          </div>
+        </div>` : ''}
+      ${p.global && isSuperadmin ? `
+        <div class="absolute top-3 right-3" style="z-index:2;">
+          <button onclick="toggleProgramMenu('${p.id}',event)"
+            class="p-1.5 rounded-lg hover:bg-gray-100 transition text-gray-500 hover:text-gray-700 font-bold text-base leading-none">
+            ···
+          </button>
+          <div id="pmenu-${p.id}" class="hidden absolute right-0 top-8 bg-white border border-gray-100 rounded-xl shadow-lg py-1 min-w-[150px]">
+            <button onclick="openEditProgramModal('${p.id}'); closeProgramMenus()"
+              class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left">
+              <i data-lucide="pencil" class="w-3.5 h-3.5 shrink-0"></i> Editar
             </button>
           </div>
         </div>` : ''}
@@ -4083,7 +5175,7 @@ function renderProgramsPage() {
       ${p.description ? `<p class="text-[11px] text-gray-500 leading-snug">${p.description}</p>` : ''}
       <div class="flex items-center gap-2 flex-wrap justify-center">
         <span class="text-[10px] font-semibold text-violet-600 bg-violet-50 px-2.5 py-1 rounded-full">Activo</span>
-        ${p.budget ? `<span class="text-[10px] font-semibold text-celeste-700 bg-celeste-50 px-2.5 py-1 rounded-full">�x�" ${remaining} / ${p.budget} pts</span>` : ''}
+        ${p.budget ? `<span class="text-[10px] font-semibold text-celeste-700 bg-celeste-50 px-2.5 py-1 rounded-full">💰" ${remaining} / ${p.budget} pts</span>` : ''}
       </div>
     </div>`;
   });
@@ -4101,7 +5193,7 @@ function renderProgramsPage() {
       ${p.tag ? `<span class="text-[10px] text-gray-400 font-medium">#${p.tag}</span>` : ''}
       ${p.description ? `<p class="text-[11px] text-gray-400 leading-snug">${p.description}</p>` : ''}
       <div class="flex items-center gap-2 flex-wrap justify-center">
-        ${p.budget ? `<span class="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">�x�" ${p.budget} pts solicitados</span>` : ''}
+        ${p.budget ? `<span class="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">💰" ${p.budget} pts solicitados</span>` : ''}
       </div>
     </div>`);
 
@@ -4156,14 +5248,14 @@ function _renderActivityWidget(recognitions, redemptions) {
   el.innerHTML = items.map(item => {
     const time = formatTimeAgo(item.date);
     if (item.type === 'received') {
-      const from = item.rec.from_user?.name || 'Alguien';
+      const from = item.rec.from_user?.name || 'Usuario eliminado';
       return `<div class="flex items-start gap-2">
         <div class="w-6 h-6 rounded-full bg-pink-100 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="heart" class="w-3 h-3 text-pink-400"></i></div>
         <div><p class="text-xs text-gray-700"><span class="font-semibold">${from}</span> te reconoció</p><p class="text-[10px] text-gray-400">${time}</p></div>
       </div>`;
     }
     if (item.type === 'sent') {
-      const to = item.rec.to_user?.name || 'Alguien';
+      const to = item.rec.to_user?.name || 'Usuario eliminado';
       return `<div class="flex items-start gap-2">
         <div class="w-6 h-6 rounded-full bg-violet-100 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="send" class="w-3 h-3 text-violet-500"></i></div>
         <div><p class="text-xs text-gray-700">Reconociste a <span class="font-semibold">${to}</span></p><p class="text-[10px] text-gray-400">${time}</p></div>
@@ -4284,13 +5376,20 @@ function renderProgramsAdmin() {
   }
 
   container.innerHTML = companyPrograms.map(p => `
-    <div class="flex items-center justify-between p-3 rounded-xl border border-gray-200 hover:border-violet-200 hover:bg-violet-50/30 transition">
+    <div class="flex items-center justify-between p-3 rounded-xl border ${p.global ? 'border-violet-100 bg-violet-50/30' : 'border-gray-200 hover:border-violet-200 hover:bg-violet-50/30'} transition">
       <div class="flex items-center gap-3">
         <span class="text-2xl">${p.emoji}</span>
         <span class="text-sm font-semibold text-gray-800">${p.name}</span>
-        ${!p.active ? '<span class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Inactivo</span>' : ''}
+        ${p.global ? '<span class="text-[10px] font-semibold text-violet-500 bg-violet-100 px-2 py-0.5 rounded-full flex items-center gap-1"><i data-lucide="lock" class="w-2.5 h-2.5"></i> Global</span>' : ''}
+        ${!p.active && !p.global ? '<span class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Inactivo</span>' : ''}
       </div>
       <div class="flex gap-1">
+        ${p.global && currentUser?.role === 'superadmin' ? `
+        <button onclick="openEditProgramModal('${p.id}')"
+          class="p-1.5 rounded-lg hover:bg-violet-50 transition" title="Editar">
+          <i data-lucide="pencil" class="w-4 h-4 text-violet-400"></i>
+        </button>` : ''}
+        ${!p.global ? `
         <button onclick="toggleProgramActive('${p.id}',${p.active})"
           class="p-1.5 rounded-lg hover:bg-gray-100 transition" title="${p.active ? 'Desactivar' : 'Activar'}">
           <i data-lucide="${p.active ? 'eye-off' : 'eye'}" class="w-4 h-4 text-gray-400"></i>
@@ -4298,7 +5397,7 @@ function renderProgramsAdmin() {
         <button onclick="deleteProgramItem('${p.id}','${p.name}')"
           class="p-1.5 rounded-lg hover:bg-red-50 transition">
           <i data-lucide="trash-2" class="w-4 h-4 text-gray-400 hover:text-red-500"></i>
-        </button>
+        </button>` : ''}
       </div>
     </div>`).join('');
   lucide.createIcons();
@@ -4362,7 +5461,7 @@ function openNewProgramModal() {
   document.getElementById('new-program-form').reset();
   document.getElementById('np-budget').value = '';
   document.getElementById('np-emp-count').textContent = '0 empleados seleccionados';
-  document.getElementById('np-emoji-btn').textContent = '�x� ';
+  document.getElementById('np-emoji-btn').textContent = '⭐ ';
   document.getElementById('np-emoji-picker').classList.add('hidden');
   document.getElementById('np-image-preview').classList.add('hidden');
   document.getElementById('np-image-placeholder').classList.remove('hidden');
@@ -4373,6 +5472,7 @@ function openNewProgramModal() {
   document.getElementById('np-budget-create').classList.remove('hidden');
   document.getElementById('np-budget-recharge').classList.add('hidden');
   document.getElementById('np-approval-notice').classList.add('hidden');
+  document.getElementById('np-emp-section').classList.remove('hidden');
   _buildEmojiGrid();
   _renderNpEmployeeList('');
   document.getElementById('new-program-modal').classList.remove('hidden');
@@ -4692,13 +5792,37 @@ function submitNewProgram(e) {
   };
 
   if (_editingProgramId) {
+    const editingProg = companyPrograms.find(x => x.id === _editingProgramId);
+
+    // Global program: only update name/emoji/tag/description
+    if (editingProg?.global) {
+      const idx = companyPrograms.findIndex(x => x.id === _editingProgramId);
+      if (idx !== -1) {
+        companyPrograms[idx] = {
+          ...companyPrograms[idx],
+          emoji:       _npSelectedEmoji,
+          name,
+          tag:         tag || name.toLowerCase().replace(/\s+/g, '-'),
+          description: desc,
+        };
+      }
+      _saveGlobalOverrides();
+      closeNewProgramModal();
+      renderProgramsPage();
+      renderHomeProgramsWidget();
+      renderProgramsInModal();
+      if (currentPage === 'admin') renderProgramsAdmin();
+      lucide.createIcons();
+      showSuccessToast(`Programa "${name}" actualizado`);
+      return;
+    }
+
     const isAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
     const added   = document.getElementById('np-budget-add').valueAsNumber || 0;
 
     if (!isAdmin && added > 0) {
-      const existingProg = companyPrograms.find(x => x.id === _editingProgramId);
       _submitProgramApprovalRequest(
-        { name: existingProg?.name || name, emoji: existingProg?.emoji || _npSelectedEmoji },
+        { name: editingProg?.name || name, emoji: editingProg?.emoji || _npSelectedEmoji },
         added,
         _editingProgramId
       );
@@ -4755,6 +5879,26 @@ function _loadCustomPrograms() {
   } catch (_) {}
 }
 
+function _saveGlobalOverrides() {
+  const overrides = {};
+  companyPrograms.filter(p => p.global).forEach(p => {
+    overrides[p.id] = { emoji: p.emoji, name: p.name, tag: p.tag, description: p.description };
+  });
+  try { localStorage.setItem('allay_global_program_overrides', JSON.stringify(overrides)); } catch (_) {}
+}
+
+function _loadGlobalOverrides() {
+  try {
+    const stored = localStorage.getItem('allay_global_program_overrides');
+    if (!stored) return;
+    const overrides = JSON.parse(stored);
+    companyPrograms = companyPrograms.map(p => {
+      if (p.global && overrides[p.id]) return { ...p, ...overrides[p.id] };
+      return p;
+    });
+  } catch (_) {}
+}
+
 function toggleProgramMenu(id, e) {
   e.stopPropagation();
   const menu = document.getElementById(`pmenu-${id}`);
@@ -4768,6 +5912,16 @@ function closeProgramMenus() {
 }
 
 document.addEventListener('click', closeProgramMenus);
+
+// Prevent browser autofill on the global search input
+function _clearSearchInput() {
+  const s = document.getElementById('global-search-input');
+  if (s) { s.value = ''; s.setAttribute('readonly', ''); }
+}
+window.addEventListener('load',     _clearSearchInput);
+window.addEventListener('pageshow', _clearSearchInput);
+// Extra: clear after a short delay to catch late autofill
+window.addEventListener('load', () => setTimeout(_clearSearchInput, 500));
 
 // ------------------------------------------------------------
 
@@ -4874,10 +6028,11 @@ async function _renderProgramHistory(reset = true) {
 
 function openEditProgramModal(id) {
   const p = companyPrograms.find(x => x.id === id);
-  if (!p || !p.custom) return;
+  if (!p || (!p.custom && !p.global)) return;
+  if (p.global && currentUser?.role !== 'superadmin') return;
 
   _editingProgramId    = id;
-  _npSelectedEmoji     = p.emoji || '�x� ';
+  _npSelectedEmoji     = p.emoji || '🏆';
   _npSelectedEmployees = new Set(p.employees || []);
   _npImageBase64       = p.image || null;
 
@@ -4886,19 +6041,32 @@ function openEditProgramModal(id) {
   document.getElementById('np-description').value = p.description || '';
   document.getElementById('np-emoji-btn').textContent = _npSelectedEmoji;
   document.getElementById('np-emoji-picker').classList.add('hidden');
-  document.getElementById('np-emp-search').value  = '';
   document.getElementById('np-modal-title').textContent = 'Editar programa';
   document.getElementById('np-submit-btn').textContent  = 'Guardar cambios';
 
-  // Budget: mostrar estado actual y campo de recarga
-  const remaining = _getProgramRemainingBudget(p);
-  document.getElementById('np-budget-remaining').textContent = remaining;
-  document.getElementById('np-budget-total').textContent     = p.budget || 0;
-  document.getElementById('np-budget-preview').textContent   = remaining;
-  document.getElementById('np-budget-add').value             = '';
-  document.getElementById('np-budget-status').classList.remove('hidden');
-  document.getElementById('np-budget-create').classList.add('hidden');
-  document.getElementById('np-budget-recharge').classList.remove('hidden');
+  if (p.global) {
+    // Global programs: hide budget and employee sections
+    document.getElementById('np-budget-status').classList.add('hidden');
+    document.getElementById('np-budget-create').classList.add('hidden');
+    document.getElementById('np-budget-recharge').classList.add('hidden');
+    document.getElementById('np-emp-section').classList.add('hidden');
+  } else {
+    document.getElementById('np-emp-section').classList.remove('hidden');
+    document.getElementById('np-emp-search').value = '';
+    // Budget: mostrar estado actual y campo de recarga
+    const remaining = _getProgramRemainingBudget(p);
+    document.getElementById('np-budget-remaining').textContent = remaining;
+    document.getElementById('np-budget-total').textContent     = p.budget || 0;
+    document.getElementById('np-budget-preview').textContent   = remaining;
+    document.getElementById('np-budget-add').value             = '';
+    document.getElementById('np-budget-status').classList.remove('hidden');
+    document.getElementById('np-budget-create').classList.add('hidden');
+    document.getElementById('np-budget-recharge').classList.remove('hidden');
+
+    _renderNpEmployeeList('');
+    document.getElementById('np-emp-count').textContent =
+      `${_npSelectedEmployees.size} empleado${_npSelectedEmployees.size !== 1 ? 's' : ''} seleccionado${_npSelectedEmployees.size !== 1 ? 's' : ''}`;
+  }
 
   const preview = document.getElementById('np-image-preview');
   if (_npImageBase64) {
@@ -4913,10 +6081,6 @@ function openEditProgramModal(id) {
   }
 
   _buildEmojiGrid();
-  _renderNpEmployeeList('');
-  document.getElementById('np-emp-count').textContent =
-    `${_npSelectedEmployees.size} empleado${_npSelectedEmployees.size !== 1 ? 's' : ''} seleccionado${_npSelectedEmployees.size !== 1 ? 's' : ''}`;
-
   document.getElementById('new-program-modal').classList.remove('hidden');
   lucide.createIcons();
 }
