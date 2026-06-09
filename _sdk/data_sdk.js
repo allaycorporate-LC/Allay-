@@ -132,6 +132,37 @@ window.dataSdk = (function () {
       return { isOk: !error };
     },
 
+    async deductPoints(amount) {
+      const { error } = await _sb.rpc('deduct_admin_points', { p_amount: amount });
+      if (error) { _log('deductPoints error:', error.message); }
+      return { isOk: !error };
+    },
+
+    async deductPointsFor(userId, amount) {
+      // Used when superadmin deducts from a specific user (e.g. during impersonation)
+      const { data, error: fetchErr } = await _sb
+        .from('profiles').select('points_to_give').eq('id', userId).single();
+      if (fetchErr) { _log('deductPointsFor fetch error:', fetchErr.message); return { isOk: false }; }
+      const current = data.points_to_give || 0;
+      if (current < amount) { _log('deductPointsFor: insufficient points'); return { isOk: false, error: 'insufficient' }; }
+      const { error } = await _sb
+        .from('profiles').update({ points_to_give: current - amount }).eq('id', userId);
+      if (error) { _log('deductPointsFor error:', error.message); }
+      return { isOk: !error };
+    },
+
+    async refundPoints(userId, amount) {
+      // Fetch current balance then add — superadmin only, RLS allows free update
+      const { data, error: fetchErr } = await _sb
+        .from('profiles').select('points_to_give').eq('id', userId).single();
+      if (fetchErr) { _log('refundPoints fetch error:', fetchErr.message); return { isOk: false }; }
+      const newBalance = (data.points_to_give || 0) + amount;
+      const { error } = await _sb
+        .from('profiles').update({ points_to_give: newBalance }).eq('id', userId);
+      if (error) { _log('refundPoints error:', error.message); }
+      return { isOk: !error };
+    },
+
     async updatePreferences({ recognition_visibility, auto_birthday, auto_anniversary }) {
       const { error } = await _sb.rpc('update_user_preferences', {
         p_recognition_visibility: recognition_visibility ?? 'public',
@@ -370,6 +401,16 @@ window.approvalsSdk = {
       .eq('id', id);
     if (error) _log('approvals update error:', error.message);
     return { isOk: !error };
+  },
+
+  async getProcessedForUser(userId) {
+    const { data, error } = await _sb
+      .from('program_budget_requests')
+      .select('status, data')
+      .eq('requested_by', userId)
+      .neq('status', 'pending');
+    if (error) _log('approvals getProcessedForUser error:', error.message);
+    return { isOk: !error, data: data || [] };
   },
 };
 

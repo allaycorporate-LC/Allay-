@@ -373,7 +373,6 @@
               <div id="bseg-3" class="h-9 w-11 rounded bg-gray-100 transition-all duration-500"></div>
               <div id="bseg-4" class="h-9 w-11 rounded bg-gray-100 transition-all duration-500"></div>
               <div id="bseg-5" class="h-9 w-11 rounded bg-gray-100 transition-all duration-500"></div>
-              <div class="w-3 h-5 bg-gray-300 rounded-r ml-0.5"></div>
             </div>
             <p id="battery-msg" class="text-base font-semibold text-gray-500 leading-snug text-right" style="max-width:16rem">No pierdas el ritmo, reconocé hoy 💪</p>
             <!-- Puntos discretos -->
@@ -610,7 +609,7 @@
 
     <!-- TAB: COLA (Queue) -->
     <div id="approvals-panel-queue">
-      <p class="text-sm text-gray-500 mb-5">Pedidos pendientes de aprobación de tus empleados.</p>
+      <p class="text-sm text-gray-500 mb-5 text-center">Pedidos pendientes de aprobación de tus empleados.</p>
       <div id="approvals-queue-list" class="space-y-3"></div>
     </div>
 
@@ -756,10 +755,30 @@
         </div>
 
         <p class="text-xs text-gray-400 mt-1">Cantidad de puntos disponibles para distribuir en este programa.</p>
+        <!-- Selector de fuente de puntos (visible solo para empleados con budget > 0) -->
+        <div id="np-funding-source-wrap" class="hidden mt-3 space-y-2">
+          <p class="text-xs font-semibold text-gray-600">¿De dónde vienen los puntos?</p>
+          <label id="np-fund-request-lbl" class="flex items-start gap-3 p-3 rounded-xl border-2 border-violet-400 bg-violet-50 cursor-pointer transition">
+            <input type="radio" name="np-funding" id="np-fund-request" value="request" checked onchange="_updateNpFundingStyle()" class="mt-0.5 accent-violet-600">
+            <div>
+              <p class="text-sm font-semibold text-gray-800">Solicitar al administrador</p>
+              <p class="text-xs text-gray-500">El admin cubre el presupuesto desde su billetera.</p>
+            </div>
+          </label>
+          <label id="np-fund-self-lbl" class="flex items-start gap-3 p-3 rounded-xl border-2 border-gray-200 bg-white cursor-pointer transition">
+            <input type="radio" name="np-funding" id="np-fund-self" value="self" onchange="onNpBudgetInput();_updateNpFundingStyle()" class="mt-0.5 accent-violet-600">
+            <div class="flex-1">
+              <p class="text-sm font-semibold text-gray-800">Usar mis puntos</p>
+              <p class="text-xs text-gray-500">Se descuentan de tu billetera. Igual requiere aprobación.</p>
+              <p id="np-fund-self-balance" class="text-xs text-violet-600 font-medium mt-0.5"></p>
+              <p id="np-fund-self-error" class="hidden text-xs text-red-500 mt-0.5">No tenés suficientes puntos.</p>
+            </div>
+          </label>
+        </div>
         <!-- Aviso de aprobación (visible sólo para empleados no-admin cuando budget > 0) -->
         <div id="np-approval-notice" class="hidden mt-2 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
           <i data-lucide="info" class="w-4 h-4 text-amber-500 shrink-0 mt-0.5"></i>
-          <p class="text-xs text-amber-700">Necesitás aprobación del administrador para asignar puntos. Tu solicitud quedará pendiente hasta que sea revisada.</p>
+          <p class="text-xs text-amber-700">Cualquier programa con puntos requiere aprobación de tu administrador. Tu solicitud quedará pendiente hasta que sea revisada, te llegará una notificación con el resultado de la solicitud.</p>
         </div>
       </div>
 
@@ -901,6 +920,35 @@
     <div class="flex gap-3 pt-1">
       <button onclick="closeDeleteProgramModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
       <button onclick="confirmDeleteProgram()" class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     SUPERADMIN DELETE PROGRAM MODAL
+══════════════════════════════════════ -->
+<div id="sa-delete-program-modal" class="hidden fixed inset-0 z-[500] flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeSaDeleteProgramModal()"></div>
+  <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+        <i data-lucide="shield-off" class="w-5 h-5 text-red-500"></i>
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-gray-800">Eliminar programa</h3>
+        <p class="text-xs text-gray-500 mt-0.5">El admin de la empresa recibirá una notificación</p>
+      </div>
+    </div>
+    <p class="text-sm text-gray-600">Vas a eliminar <span id="sa-delete-program-name" class="font-semibold text-gray-800"></span>.</p>
+    <div>
+      <label class="block text-xs font-semibold text-gray-700 mb-1.5">Motivo <span class="text-red-400">*</span></label>
+      <textarea id="sa-delete-reason" rows="3" placeholder="Explicá el motivo de la eliminación..."
+        class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-700 resize-none focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-300"></textarea>
+      <p id="sa-delete-reason-error" class="hidden text-xs text-red-500 mt-1">El motivo es obligatorio.</p>
+    </div>
+    <div class="flex gap-3 pt-1">
+      <button onclick="closeSaDeleteProgramModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
+      <button onclick="confirmSaDeleteProgram()" class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition">Eliminar</button>
     </div>
   </div>
 </div>
@@ -1086,6 +1134,7 @@
                 <span class="text-xs text-violet-600 font-semibold bg-violet-50 px-2 py-0.5 rounded-full border border-violet-100">Tenés <span id="modal-pts-available">0</span> pts</span>
               </div>
               <p class="text-xs text-gray-400 mt-0.5">Opcional — podés reconocer sin dar puntos</p>
+              <p id="no-points-msg" class="hidden text-xs text-amber-600 font-medium mt-0.5">No tenés puntos disponibles para asignar.</p>
             </div>
             <!-- Switch -->
             <button type="button" id="points-toggle" onclick="togglePointsSwitch()"
@@ -1097,9 +1146,12 @@
           <!-- Slider (hidden by default) -->
           <div id="points-slider-wrap" class="hidden mt-4">
             <div class="flex items-center gap-3">
-              <input type="range" id="points-slider" min="0" max="50" value="25" step="5"
+              <input type="range" id="points-slider" min="5" max="50" value="25" step="5"
                 class="flex-1 accent-violet-500" oninput="updatePointsSlider(this.value)">
-              <span id="points-val" class="text-lg font-bold text-violet-600 w-8 text-center">25</span>
+              <input type="number" id="points-val" min="5" max="50" value="25" step="5"
+                class="text-lg font-bold text-violet-600 w-14 text-center border border-violet-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+                oninput="updatePointsFromInput(this.value)"
+                onblur="clampPointsInput()">
               <span class="text-xs text-gray-400">pts</span>
             </div>
             <p id="points-warning" class="text-xs text-red-500 mt-1 hidden">No tenés suficientes puntos</p>
@@ -1151,7 +1203,7 @@
               <button id="img-tab-library" onclick="switchImageTab('library')" class="flex-1 py-1.5 text-xs font-semibold rounded-md bg-white text-violet-700 shadow-sm transition">Biblioteca</button>
               <button id="img-tab-upload" onclick="switchImageTab('upload')" class="flex-1 py-1.5 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-700 transition">Subir imagen</button>
             </div>
-            <div id="img-panel-library" class="grid grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-0.5 rounded-xl"></div>
+            <div id="img-panel-library" class="grid grid-cols-3 gap-2 max-h-44 overflow-y-scroll pr-0.5 rounded-xl" style="will-change:transform;-webkit-overflow-scrolling:touch;contain:layout style;"></div>
             <div id="img-panel-upload" class="hidden border-2 border-dashed border-gray-200 rounded-xl p-5 text-center hover:border-violet-300 transition cursor-pointer" onclick="document.getElementById('file-input').click()">
               <i data-lucide="image-plus" class="w-7 h-7 mx-auto text-gray-300 mb-1.5"></i>
               <p class="text-sm text-gray-400">Clic para subir una imagen</p>

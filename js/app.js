@@ -283,6 +283,7 @@ async function handleLogin(e) {
       renderFeed(true);
       loadNotifications();
       loadCompanyPrograms();
+      _syncApprovedPrograms();
       _loadApprovals();
       loadHomeSidebar();
       _setupFeedRealtime();
@@ -1846,7 +1847,7 @@ function renderRecognitionBattery() {
   for (let i = 1; i <= MAX; i++) {
     const seg = document.getElementById(`bseg-${i}`);
     if (!seg) continue;
-    seg.className = `h-4 w-5 rounded transition-all duration-500 ${i <= filled ? 'bg-[#3d2b56]' : 'bg-gray-100'}`;
+    seg.className = `h-9 w-11 rounded transition-all duration-500 ${i <= filled ? 'bg-green-400' : 'bg-gray-100'}`;
   }
 
   const label = document.getElementById('battery-label');
@@ -2162,7 +2163,8 @@ function _renderUpFeed() {
     const otherInitial = (other[0] || '?').toUpperCase();
     const time         = formatTimeAgo(r.created_at);
     const program      = r.program || '';
-    const message      = _cleanPrivateMarker(r.message || '');
+    const rawMessage   = _cleanPrivateMarker(r.message || '');
+    const { text: msgText, imgs: msgImgs } = parseCommentMessage(rawMessage);
     const points       = Number(r.points) || 0;
     const label = isSent
       ? `Reconociste a <span class="font-semibold text-gray-800">${esc(other)}</span>`
@@ -2175,8 +2177,11 @@ function _renderUpFeed() {
         ? `<span class="text-xs font-semibold text-[#3d2b56]">-${points} pts</span>`
         : `<span class="text-xs font-semibold text-[#e87cb4]">+${points} pts</span>`
       : '';
-    const messageEl = message
-      ? `<p class="text-xs text-gray-500 italic mt-1 leading-relaxed">"${esc(message)}"</p>`
+    const messageEl = msgText
+      ? `<p class="text-xs text-gray-500 italic mt-1 leading-relaxed">"${esc(msgText)}"</p>`
+      : '';
+    const imgsEl = msgImgs.length
+      ? msgImgs.map(url => `<img src="${esc(url)}" class="mt-2 rounded-lg max-h-40 max-w-full object-cover" loading="lazy">`).join('')
       : '';
     return `<div class="flex items-start gap-3 py-3 border-b border-gray-50 last:border-0">
       <div class="w-9 h-9 rounded-full ${getAvatarColor(other)} flex items-center justify-center text-white text-sm font-bold shrink-0">${esc(otherInitial)}</div>
@@ -2189,7 +2194,7 @@ function _renderUpFeed() {
           <p class="text-xs text-[#3d2b56] font-medium">${esc(program)}</p>
           ${pointsBadge}
         </div>
-        ${messageEl}
+        ${messageEl}${imgsEl}
         <p class="text-xs text-gray-400 mt-1">${time}</p>
       </div>
     </div>`;
@@ -2938,6 +2943,7 @@ function impersonateEmployee(empBackendId) {
   renderFeed(true);
   loadHomeSidebar();
   loadNotifications();
+  _loadApprovals();
   _setupFeedRealtime();
   renderRecognitionBattery();
   lucide.createIcons();
@@ -3015,12 +3021,27 @@ function openModal() {
   const msgEl = document.getElementById('recog-message');
   if (msgEl) { msgEl.value = ''; msgEl.blur(); }
 
-  document.getElementById('points-slider').value = 25;
-  document.getElementById('points-slider').max   = currentUser?.points_to_give ?? 50;
-  document.getElementById('points-val').textContent = '25';
+  const availPts = currentUser?.points_to_give ?? 0;
+  const initPts  = Math.min(25, availPts);
+  const slider = document.getElementById('points-slider');
+  slider.min   = 5;
+  slider.max   = availPts;
+  slider.value = initPts;
+  document.getElementById('points-val').value = initPts;
   document.getElementById('points-warning').classList.add('hidden');
   const modalPtsAvail = document.getElementById('modal-pts-available');
-  if (modalPtsAvail) modalPtsAvail.textContent = currentUser?.points_to_give ?? 0;
+  if (modalPtsAvail) modalPtsAvail.textContent = availPts;
+
+  // Disable toggle if user has no points
+  const toggleBtn = document.getElementById('points-toggle');
+  if (toggleBtn) {
+    const noPoints = availPts === 0;
+    toggleBtn.disabled = noPoints;
+    toggleBtn.style.opacity = noPoints ? '0.4' : '';
+    toggleBtn.style.cursor  = noPoints ? 'not-allowed' : '';
+    const noPointsMsg = document.getElementById('no-points-msg');
+    if (noPointsMsg) noPointsMsg.classList.toggle('hidden', !noPoints);
+  }
   document.getElementById('program-budget-info')?.classList.add('hidden');
   const cb = document.getElementById('use-program-budget');
   if (cb) cb.checked = false;
@@ -3044,12 +3065,18 @@ function _setPointsSwitch(on) {
 
 function togglePointsSwitch() {
   const btn = document.getElementById('points-toggle');
+  if (btn.disabled) return;
   const isOn = btn.getAttribute('aria-checked') === 'true';
   _setPointsSwitch(!isOn);
   if (!isOn) {
-    // ------------------------------------------------------------
+    // Turning ON: start at 10 pts (or max available if less than 10)
+    const avail  = currentUser?.points_to_give ?? 0;
+    const start  = Math.min(10, avail);
+    const slider = document.getElementById('points-slider');
+    slider.value = start;
+    document.getElementById('points-val').value = start;
+    updatePointsSlider(start);
   } else {
-    // ------------------------------------------------------------
     document.getElementById('modal-next').disabled = false;
   }
 }
@@ -3241,15 +3268,43 @@ function nextStep() {
 function prevStep() { if (currentStep > 1) showStep(currentStep - 1); }
 
 function updatePointsSlider(value) {
-  document.getElementById('points-val').textContent = value;
+  const inp = document.getElementById('points-val');
+  if (inp) inp.value = value;
+  _checkPointsValidity(parseInt(value));
+}
+
+function updatePointsFromInput(raw) {
+  const avail  = currentUser?.points_to_give ?? 0;
+  const parsed = parseInt(raw);
+  if (isNaN(parsed)) return;
+  const clamped = Math.max(5, Math.min(parsed, avail));
+  const slider  = document.getElementById('points-slider');
+  if (slider) slider.value = clamped;
+  _checkPointsValidity(clamped);
+}
+
+function clampPointsInput() {
+  const avail  = currentUser?.points_to_give ?? 0;
+  const inp    = document.getElementById('points-val');
+  const slider = document.getElementById('points-slider');
+  if (!inp) return;
+  let v = parseInt(inp.value);
+  if (isNaN(v) || v < 5) v = 5;
+  if (v > avail) v = avail;
+  inp.value = v;
+  if (slider) slider.value = v;
+  _checkPointsValidity(v);
+}
+
+function _checkPointsValidity(value) {
   const usingBudget = document.getElementById('use-program-budget')?.checked;
   const prog        = _getProgramByLabel(selectedProgram);
   const n           = Math.max(1, _selectedRecipients.length);
   let ok;
   if (usingBudget && prog?.custom) {
-    ok = _getProgramRemainingBudget(prog) >= parseInt(value) * n;
+    ok = _getProgramRemainingBudget(prog) >= value * n;
   } else {
-    ok = currentUser && currentUser.points_to_give >= parseInt(value) * n;
+    ok = currentUser && currentUser.points_to_give >= value * n;
   }
   document.getElementById('points-warning').classList.toggle('hidden', ok || !currentUser);
   document.getElementById('modal-next').disabled = !ok && !!currentUser;
@@ -3296,7 +3351,7 @@ function toggleBudgetSource() {
     const maxPerPerson = Math.floor(remaining / n);
     slider.max   = maxPerPerson;
     slider.value = Math.min(parseInt(slider.value), maxPerPerson);
-    document.getElementById('points-val').textContent = slider.value;
+    document.getElementById('points-val').value = slider.value;
     document.getElementById('points-warning').classList.add('hidden');
     document.getElementById('modal-next').disabled = false;
   } else {
@@ -3520,9 +3575,14 @@ function _weeklyKey() {
 function _getWeeklyData() {
   try {
     const raw = localStorage.getItem(_weeklyKey());
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Migrate old 7-day arrays to 5-day
+      if (parsed.days && parsed.days.length > 5) parsed.days = parsed.days.slice(0, 5);
+      return parsed;
+    }
   } catch (_) {}
-  return { days: [false, false, false, false, false, false, false], count: 0 };
+  return { days: [false, false, false, false, false], count: 0 };
 }
 
 function _saveWeeklyData(data) {
@@ -3530,18 +3590,17 @@ function _saveWeeklyData(data) {
 }
 
 function _todayIndex() {
-  return (new Date().getDay() + 6) % 7;
+  const d = (new Date().getDay() + 6) % 7; // 0=L … 6=D
+  return d < 5 ? d : null; // null on weekends
 }
 
-const WEEKLY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+const WEEKLY_LABELS = ['L', 'M', 'X', 'J', 'V'];
 const WEEKLY_DAY_PHRASES = [
   'Sin días activos aún',
   '1 día activo 🕑',
   '2 días activos 🌱',
   '3 días activos 🚀',
   '4 días activos 💪',
-  '5 días activos ⭐',
-  '6 días activos ✨',
   '¡Semana perfecta! 🌟',
 ];
 
@@ -3550,28 +3609,30 @@ function renderWeeklyRecap() {
   const barsEl = document.getElementById('weekly-recap-bars');
   if (!textEl || !barsEl) return;
   const data       = _getWeeklyData();
-  const today      = _todayIndex();
+  const today      = _todayIndex(); // null on weekends
   const activeDays = (data.days || []).filter(Boolean).length;
   textEl.textContent = WEEKLY_DAY_PHRASES[Math.min(activeDays, WEEKLY_DAY_PHRASES.length - 1)];
   barsEl.innerHTML = WEEKLY_LABELS.map((label, i) => {
     const filled  = data.days[i];
     const isToday = i === today;
     const bar = filled
-      ? 'w-full h-5 rounded-sm bg-[#3d2b56]'
+      ? 'w-full h-5 rounded-sm bg-[#e8588a]'
       : isToday
-        ? 'w-full h-5 rounded-sm bg-violet-100 border border-violet-300'
+        ? 'w-full h-5 rounded-sm bg-pink-50 border border-pink-200'
         : 'w-full h-5 rounded-sm bg-gray-100';
     return `<div class="flex flex-col items-center gap-1 flex-1">
       <div class="${bar}"></div>
-      <span class="text-[9px] font-medium ${filled ? 'text-[#3d2b56]' : isToday ? 'text-violet-400' : 'text-gray-300'}">${label}</span>
+      <span class="text-[9px] font-medium ${filled ? 'text-[#e8588a]' : isToday ? 'text-pink-300' : 'text-gray-300'}">${label}</span>
     </div>`;
   }).join('');
 }
 
 function _incrementWeeklyRecap() {
   if (!currentUser) return;
+  const todayIdx = _todayIndex();
+  if (todayIdx === null) return; // weekend — don't track
   const data  = _getWeeklyData();
-  data.days[_todayIndex()] = true;
+  data.days[todayIdx] = true;
   data.count = (data.count || 0) + 1;
   _saveWeeklyData(data);
   renderWeeklyRecap();
@@ -4318,6 +4379,9 @@ function renderNotificationsDropdown() {
     } else if (n.type === 'program_rejected') {
       icon = 'x-circle'; iconColor = 'red';
       text = `${n.data?.program_emoji || '🏆'} Tu solicitud de <strong>${esc(n.data?.program_name)}</strong> fue rechazada`;
+    } else if (n.type === 'program_deleted_by_superadmin') {
+      icon = 'shield-off'; iconColor = 'red';
+      text = `El programa <strong>${esc(n.data?.program_name)}</strong> fue eliminado por <span class="font-semibold">${esc(n.data?.deleted_by)}</span>. Motivo: "${esc(n.data?.reason)}"${n.data?.refund_note ? ` <span class="text-green-600">${esc(n.data.refund_note)}</span>` : ''}`;
     } else if (n.type === 'csv_request') {
       icon = 'file-up'; iconColor = 'amber';
       text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó cargar <strong>${n.data?.row_count || '?'} empleados</strong> (${esc(n.data?.file_name || 'CSV')})`;
@@ -4372,6 +4436,9 @@ function renderNotificationsPage() {
     } else if (n.type === 'program_rejected') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="x-circle" class="w-5 h-5 text-red-500"></i></div>`;
       text = `${n.data?.program_emoji || '🏆'} Tu solicitud del ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${esc(n.data?.program_name)}</strong> fue rechazada por <span class="font-semibold">${esc(n.data?.rejected_by)}</span>`;
+    } else if (n.type === 'program_deleted_by_superadmin') {
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="shield-off" class="w-5 h-5 text-red-500"></i></div>`;
+      text = `El programa <strong>${esc(n.data?.program_name)}</strong> fue eliminado por <span class="font-semibold">${esc(n.data?.deleted_by)}</span>.<br><span class="text-gray-500">Motivo: "${esc(n.data?.reason)}"</span>${n.data?.refund_note ? `<br><span class="text-green-600 text-xs">${esc(n.data.refund_note)}</span>` : ''}`;
     } else if (n.type === 'csv_request') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0"><i data-lucide="file-up" class="w-5 h-5 text-amber-500"></i></div>`;
       text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó cargar <strong>${n.data?.row_count || '?'} empleados</strong> · ${esc(n.data?.file_name || 'CSV')} · ${esc(n.data?.company_id || '')}`;
@@ -4685,8 +4752,12 @@ async function _loadApprovals() {
     try {
       const legacy = localStorage.getItem('allay_approvals_queue');
       if (legacy) {
+        const _isUuid = s => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
         const legacyItems = JSON.parse(legacy).filter(l => !_approvalsQueue.find(q => q.id === l.id));
-        for (const item of legacyItems) await window.approvalsSdk.add(item);
+        for (const item of legacyItems) {
+          if (!_isUuid(item.id)) item.id = crypto.randomUUID();
+          await window.approvalsSdk.add(item);
+        }
         localStorage.removeItem('allay_approvals_queue');
         localStorage.removeItem('allay_approvals_history');
         if (legacyItems.length) await _loadApprovals();
@@ -4694,7 +4765,51 @@ async function _loadApprovals() {
       }
     } catch (_) {}
   }
+  // Always try to recover orphaned pending programs (runs for employees too)
+  await _resyncOrphanedPendingPrograms();
   _updateApprovalsNavBadge();
+  if (currentPage === 'approvals') renderApprovalsPage();
+}
+
+async function _resyncOrphanedPendingPrograms() {
+  if (!currentUser?.__backendId || !window.approvalsSdk) return;
+  // Only employees need this — admins already see all requests via _loadApprovals
+  if (_isApprover()) return;
+
+  const orphans = companyPrograms.filter(p =>
+    p.pending === true &&
+    p.createdBy === currentUser.__backendId &&
+    !p._requestId  // not yet submitted successfully
+  );
+  if (!orphans.length) return;
+
+  const colors = ['bg-[#3d2b56]', 'bg-[#f19ac4]', 'bg-[#c9a7d4]'];
+  let changed = false;
+  for (const prog of orphans) {
+    const req = {
+      id:                crypto.randomUUID(),
+      type:              'program_budget',
+      employee:          currentUser.name,
+      avatarInitials:    (currentUser.name || '').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2),
+      avatarColor:       colors[(currentUser.name || '').length % colors.length],
+      points:            prog.budget || 0,
+      programName:       prog.name,
+      programEmoji:      prog.emoji,
+      programData:       { ...prog },
+      rechargeFor:       null,
+      pendingProgramId:  prog.id,
+      requestedByUserId: currentUser.__backendId,
+      company_id:        currentUser.company_id,
+      requestedAt:       new Date().toISOString(),
+      status:            'pending',
+    };
+    const { isOk } = await window.approvalsSdk.add(req);
+    if (isOk) {
+      prog._requestId = req.id; // mark so we don't resubmit next login
+      changed = true;
+    }
+  }
+  if (changed) _saveCustomPrograms();
 }
 
 let _approvalsTab           = 'queue';
@@ -4729,7 +4844,7 @@ function _updateApprovalsNavBadge() {
   badge.classList.toggle('hidden', pending === 0);
 }
 
-function _submitProgramApprovalRequest(programData, budget, rechargeFor = null) {
+function _submitProgramApprovalRequest(programData, budget, rechargeFor = null, fundingSource = 'request') {
   const name     = currentUser?.name || 'Empleado';
   const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
   const colors   = ['bg-[#3d2b56]', 'bg-[#f19ac4]', 'bg-[#c9a7d4]'];
@@ -4752,7 +4867,7 @@ function _submitProgramApprovalRequest(programData, budget, rechargeFor = null) 
   }
 
   const req = {
-    id:                'apr-' + Date.now(),
+    id:                crypto.randomUUID(),
     type:              'program_budget',
     employee:          name,
     avatarInitials:    initials,
@@ -4767,10 +4882,16 @@ function _submitProgramApprovalRequest(programData, budget, rechargeFor = null) 
     company_id:        currentUser?.company_id,
     requestedAt:       new Date().toISOString(),
     status:            'pending',
+    fundingSource:     fundingSource, // 'request' | 'self'
   };
 
   _approvalsQueue.unshift(req);
-  if (window.approvalsSdk) window.approvalsSdk.add(req).catch(_log);
+  if (window.approvalsSdk) window.approvalsSdk.add(req).then(({ isOk }) => {
+    if (isOk && pendingProgramId) {
+      const p = companyPrograms.find(x => x.id === pendingProgramId);
+      if (p) { p._requestId = req.id; _saveCustomPrograms(); }
+    }
+  }).catch(_log);
   _updateApprovalsNavBadge();
   if (currentPage === 'programs') renderProgramsPage();
   showSuccessToast(`Solicitud de "${programData.name}" enviada al administrador`);
@@ -4805,6 +4926,8 @@ function openApprovalsPage() {
   page.classList.remove('hidden');
   _positionOverlayPage('approvals-page');
   renderApprovalsPage();
+  // Reload from Supabase to get latest requests, then re-render
+  _loadApprovals();
 }
 
 function closeApprovalsPage() {
@@ -4890,29 +5013,54 @@ function renderApprovalsQueue() {
     return;
   }
 
-  container.innerHTML = pending.map(req => `
+  container.innerHTML = pending.map(req => {
+    const pd = req.programData || {};
+    const employees = Array.isArray(pd.employees) ? pd.employees : [];
+    const empNames = employees.map(id => {
+      const u = allUsers.find(u => u.__backendId === id);
+      return u ? esc(u.name) : null;
+    }).filter(Boolean);
+    const detailId = `req-detail-${req.id.replace(/[^a-z0-9]/gi,'_')}`;
+
+    const detailRows = [];
+    if (pd.tag)         detailRows.push(`<div class="flex items-center gap-2"><span class="text-xs text-gray-400 w-24 shrink-0">Etiqueta</span><span class="text-xs font-medium text-gray-700">#${esc(pd.tag)}</span></div>`);
+    if (pd.description) detailRows.push(`<div class="flex items-start gap-2"><span class="text-xs text-gray-400 w-24 shrink-0">Descripción</span><span class="text-xs text-gray-700">${esc(pd.description)}</span></div>`);
+    if (empNames.length) detailRows.push(`<div class="flex items-start gap-2"><span class="text-xs text-gray-400 w-24 shrink-0">Participantes</span><span class="text-xs text-gray-700">${empNames.join(', ')}</span></div>`);
+    else if (employees.length === 0 && !pd.global) detailRows.push(`<div class="flex items-center gap-2"><span class="text-xs text-gray-400 w-24 shrink-0">Participantes</span><span class="text-xs text-gray-500 italic">Todos los empleados</span></div>`);
+    if (req.points)     detailRows.push(`<div class="flex items-center gap-2"><span class="text-xs text-gray-400 w-24 shrink-0">Budget</span><span class="text-xs font-semibold text-violet-700">${req.points} pts</span></div>`);
+
+    return `
     <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hover:shadow-md transition" data-req-id="${req.id}">
       <div class="flex items-start gap-4">
         <div class="w-10 h-10 rounded-full ${req.avatarColor} flex items-center justify-center text-white font-bold text-sm shrink-0">${req.avatarInitials}</div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap mb-0.5">
-            <span class="font-bold text-sm text-gray-800">${req.employee}</span>
+            <span class="font-bold text-sm text-gray-800">${esc(req.employee)}</span>
             <span class="text-[10px] font-bold uppercase tracking-wide text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">${req.rechargeFor ? 'Recarga de puntos' : 'Nuevo programa'}</span>
           </div>
           <p class="text-xs text-gray-400 mb-3">${formatTimeAgo(req.requestedAt)}</p>
-          <!-- Program detail card -->
-          <div class="bg-gray-50 rounded-xl px-4 py-3 mb-3 flex items-center gap-3">
+          <!-- Program detail card — click to expand -->
+          <button onclick="toggleApprovalDetail('${detailId}')"
+            class="w-full bg-gray-50 hover:bg-violet-50 rounded-xl px-4 py-3 mb-1 flex items-center gap-3 transition text-left group">
             <span class="text-2xl">${req.programEmoji}</span>
-            <div>
-              <p class="text-sm font-bold text-gray-800">${req.programName}</p>
-              <p class="text-xs text-gray-400">${req.rechargeFor ? 'Recarga de budget del programa' : 'Programa personalizado · solicita budget de'}</p>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-bold text-gray-800">${esc(req.programName)}</p>
+              <p class="text-xs text-gray-400">${req.rechargeFor ? 'Recarga de budget del programa' : 'Programa personalizado'}</p>
             </div>
-            <div class="ml-auto flex items-center gap-1.5 bg-white border border-violet-100 rounded-xl px-3 py-1.5 shrink-0">
-              <i data-lucide="coins" class="w-4 h-4 text-violet-500"></i>
-              <span class="text-sm font-bold text-violet-700">${req.points} pts</span>
+            <div class="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+              ${req.fundingSource === 'self' ? `<span class="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">puntos del usuario</span>` : ''}
+              <div class="flex items-center gap-1 bg-white border border-violet-100 rounded-xl px-3 py-1.5">
+                <i data-lucide="coins" class="w-4 h-4 text-violet-500"></i>
+                <span class="text-sm font-bold text-violet-700">${req.points} pts</span>
+              </div>
+              <i data-lucide="chevron-down" class="w-4 h-4 text-gray-400 group-hover:text-violet-500 transition req-chevron-${detailId}"></i>
             </div>
+          </button>
+          <!-- Expanded detail panel -->
+          <div id="${detailId}" class="hidden mb-3 bg-violet-50 border border-violet-100 rounded-xl px-4 py-3 space-y-2">
+            ${detailRows.length ? detailRows.join('') : '<p class="text-xs text-gray-400 italic">Sin detalles adicionales.</p>'}
           </div>
-          <div class="flex justify-end gap-2">
+          <div class="flex justify-end gap-2 flex-wrap mt-3">
             <button onclick="approveRequest('${req.id}')"
               class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-green-500 text-white text-sm font-semibold hover:opacity-90 transition shadow-sm">
               <i data-lucide="check" class="w-4 h-4"></i> Aprobar
@@ -4921,11 +5069,27 @@ function renderApprovalsQueue() {
               class="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-red-200 text-red-500 text-sm font-semibold hover:bg-red-50 transition">
               <i data-lucide="x" class="w-4 h-4"></i> Rechazar
             </button>
+            ${isSuperadmin() ? `
+            <button onclick="openSaDeleteProgramModal('${req.pendingProgramId||''}','${(req.programName||'').replace(/'/g,"\\'")}','${req.id}','${req.company_id||''}')"
+              class="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-gray-200 text-gray-500 text-sm font-semibold hover:bg-gray-50 transition" title="Eliminar programa (Superadmin)">
+              <i data-lucide="shield-off" class="w-4 h-4"></i> Eliminar
+            </button>` : ''}
           </div>
         </div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
+}
+
+function toggleApprovalDetail(detailId) {
+  const panel   = document.getElementById(detailId);
+  if (!panel) return;
+  const isOpen  = !panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', isOpen);
+  // Rotate chevron
+  document.querySelectorAll(`.req-chevron-${detailId}`).forEach(el => {
+    el.style.transform = isOpen ? '' : 'rotate(180deg)';
+  });
 }
 
 function renderApprovalsHistory() {
@@ -4988,10 +5152,36 @@ function approveRequest(reqId) {
   const idx = _approvalsQueue.findIndex(r => r.id === reqId);
   if (idx === -1) return;
   const req = _approvalsQueue[idx];
+
+  // Block if admin doesn't have enough points (only when admin is funding)
+  const cost = Number(req.points) || 0;
+  if (cost > 0 && req.fundingSource !== 'self') {
+    const adminPts = currentUser?.points_to_give ?? 0;
+    if (adminPts < cost) {
+      showErrorToast(`No tenés suficientes puntos para aprobar este programa (necesitás ${cost} pts, tenés ${adminPts} pts).`);
+      return;
+    }
+  }
+
   req.status    = 'approved';
   req.resolvedBy = currentUser?.name || 'Admin';
   _approvalsQueue.splice(idx, 1);
   _approvalsHistory.unshift(req);
+
+  // Deduct points from admin wallet (only if employee didn't self-fund)
+  if (cost > 0 && currentUser && req.fundingSource !== 'self') {
+    currentUser.points_to_give = (currentUser.points_to_give ?? 0) - cost;
+    if (isImpersonating) {
+      const adminRecord = allUsers.find(u => u.__backendId === currentUser.__backendId);
+      if (adminRecord) {
+        adminRecord.points_to_give = currentUser.points_to_give;
+        window.dataSdk.update({ ...adminRecord }).catch(_log);
+      }
+    } else {
+      window.dataSdk.deductPoints(cost).catch(_log);
+    }
+    updateAllPointsDisplays();
+  }
 
   // Apply the approved action
   if (req.programData) {
@@ -5150,10 +5340,15 @@ function renderProgramsPage() {
               class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left">
               <i data-lucide="pencil" class="w-3.5 h-3.5 shrink-0"></i> Editar
             </button>
-            <button onclick="openDeleteProgramModal('${p.id}','${p.name.replace(/'/g,"\\'")}'); closeProgramMenus()"
+            ${isSuperadmin ? `
+            <button onclick="openSaDeleteProgramModal('${p.id}','${p.name.replace(/'/g,"\\'")}',null,'${p.company_id||''}'); closeProgramMenus()"
               class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left">
+              <i data-lucide="shield-off" class="w-3.5 h-3.5 shrink-0"></i> Eliminar
+            </button>` : `
+            <button disabled title="Solo el superadmin puede eliminar programas. Solicitalo a tu superadministrador."
+              class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-300 cursor-not-allowed text-left">
               <i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i> Eliminar
-            </button>
+            </button>`}
           </div>
         </div>` : ''}
       ${p.global && isSuperadmin ? `
@@ -5166,6 +5361,10 @@ function renderProgramsPage() {
             <button onclick="openEditProgramModal('${p.id}'); closeProgramMenus()"
               class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left">
               <i data-lucide="pencil" class="w-3.5 h-3.5 shrink-0"></i> Editar
+            </button>
+            <button onclick="openSaDeleteProgramModal('${p.id}','${p.name.replace(/'/g,"\\'")}',null,null); closeProgramMenus()"
+              class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left">
+              <i data-lucide="shield-off" class="w-3.5 h-3.5 shrink-0"></i> Eliminar (SA)
             </button>
           </div>
         </div>` : ''}
@@ -5180,7 +5379,9 @@ function renderProgramsPage() {
     </div>`;
   });
 
-  const pendingCards = pending.map(p => `
+  const pendingCards = pending.map(p => {
+    const reqId = _approvalsQueue.find(r => r.pendingProgramId === p.id)?.id || null;
+    return `
     <div class="bg-gray-50 rounded-2xl border border-amber-200 shadow-sm p-6 flex flex-col items-center gap-3 text-center relative opacity-75">
       <div class="absolute top-3 left-3">
         <span class="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -5188,14 +5389,22 @@ function renderProgramsPage() {
           Pendiente de aprobación
         </span>
       </div>
+      ${isSuperadmin ? `
+      <div class="absolute top-3 right-3" style="z-index:2;">
+        <button onclick="openSaDeleteProgramModal('${p.id}','${p.name.replace(/'/g,"\\'")}','${reqId||''}','${p.company_id||''}')"
+          class="p-1.5 rounded-lg hover:bg-red-50 transition text-red-400 hover:text-red-600" title="Eliminar programa">
+          <i data-lucide="shield-off" class="w-4 h-4"></i>
+        </button>
+      </div>` : ''}
       <div class="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center text-3xl mt-4">${p.emoji || '⭐'}</div>
       <h3 class="font-bold text-gray-500 text-sm">${p.name}</h3>
       ${p.tag ? `<span class="text-[10px] text-gray-400 font-medium">#${p.tag}</span>` : ''}
       ${p.description ? `<p class="text-[11px] text-gray-400 leading-snug">${p.description}</p>` : ''}
       <div class="flex items-center gap-2 flex-wrap justify-center">
-        ${p.budget ? `<span class="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">💰" ${p.budget} pts solicitados</span>` : ''}
+        ${p.budget ? `<span class="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">💰 ${p.budget} pts solicitados</span>` : ''}
       </div>
-    </div>`);
+    </div>`;
+  });
 
   grid.innerHTML = [...activeCards, ...pendingCards].join('');
 }
@@ -5359,11 +5568,39 @@ function renderProgramsInModal() {
   updateModalBtn();
 
   grid.innerHTML = active.map(p => `
-    <div class="program-item p-4 rounded-xl border-2 border-gray-200 hover:border-violet-400 cursor-pointer transition text-center"
-         onclick="selectProgram(this,'${p.emoji} ${p.name}')">
+    <div class="program-item p-4 rounded-xl border-2 border-gray-200 hover:border-violet-400 cursor-pointer transition text-center relative"
+         onclick="selectProgram(this,'${p.emoji} ${p.name}')"
+         ${p.description ? `data-description="${esc(p.description)}" onmouseenter="showProgTooltip(this)" onmouseleave="hideProgTooltip()"` : ''}>
       <span class="text-3xl">${p.emoji}</span>
       <p class="text-sm font-semibold text-gray-800 mt-2">${p.name}</p>
+      ${p.description ? `<span class="absolute top-2 right-2 w-4 h-4 rounded-full bg-gray-100 text-gray-400 text-[9px] font-bold flex items-center justify-center leading-none pointer-events-none">i</span>` : ''}
     </div>`).join('');
+}
+
+function showProgTooltip(el) {
+  const desc = el.dataset.description;
+  if (!desc) return;
+  let tip = document.getElementById('prog-tooltip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'prog-tooltip';
+    tip.className = 'fixed z-[200] bg-gray-800 text-white text-xs rounded-xl px-3 py-2 shadow-xl pointer-events-none max-w-[200px] leading-relaxed';
+    document.body.appendChild(tip);
+  }
+  tip.textContent = desc;
+  tip.style.display = 'block';
+  const rect = el.getBoundingClientRect();
+  const tipW = 200;
+  let left = rect.left + rect.width / 2 - tipW / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - tipW - 8));
+  const top = rect.bottom + 6;
+  tip.style.left = left + 'px';
+  tip.style.top  = top + 'px';
+}
+
+function hideProgTooltip() {
+  const tip = document.getElementById('prog-tooltip');
+  if (tip) tip.style.display = 'none';
 }
 
 function renderProgramsAdmin() {
@@ -5472,6 +5709,10 @@ function openNewProgramModal() {
   document.getElementById('np-budget-create').classList.remove('hidden');
   document.getElementById('np-budget-recharge').classList.add('hidden');
   document.getElementById('np-approval-notice').classList.add('hidden');
+  document.getElementById('np-funding-source-wrap').classList.add('hidden');
+  document.getElementById('np-fund-request').checked = true;
+  document.getElementById('np-fund-self-error').classList.add('hidden');
+  _updateNpFundingStyle();
   document.getElementById('np-emp-section').classList.remove('hidden');
   _buildEmojiGrid();
   _renderNpEmployeeList('');
@@ -5497,12 +5738,27 @@ function updateBudgetPreview() {
 }
 
 function onNpBudgetInput() {
-  if (_editingProgramId) return; // editing mode doesn't need approval flow
+  if (_editingProgramId) return;
   const isAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
   const budget  = document.getElementById('np-budget').valueAsNumber || 0;
   const needsApproval = !isAdmin && budget > 0;
+
+  document.getElementById('np-funding-source-wrap').classList.toggle('hidden', !needsApproval);
   document.getElementById('np-approval-notice').classList.toggle('hidden', !needsApproval);
   document.getElementById('np-submit-btn').textContent = needsApproval ? 'Solicitar aprobación' : 'Crear programa';
+
+  if (needsApproval) {
+    const avail = currentUser?.points_to_give ?? 0;
+    document.getElementById('np-fund-self-balance').textContent = `Tenés ${avail} pts disponibles`;
+    document.getElementById('np-fund-self-error').classList.toggle('hidden', avail >= budget);
+    _updateNpFundingStyle();
+  }
+}
+
+function _updateNpFundingStyle() {
+  const isRequest = document.getElementById('np-fund-request').checked;
+  document.getElementById('np-fund-request-lbl').className = `flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition ${isRequest ? 'border-violet-400 bg-violet-50' : 'border-gray-200 bg-white'}`;
+  document.getElementById('np-fund-self-lbl').className    = `flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition ${!isRequest ? 'border-violet-400 bg-violet-50' : 'border-gray-200 bg-white'}`;
 }
 
 function toggleEmojiPicker() {
@@ -5571,6 +5827,14 @@ async function _renderImageLibrary() {
     </button>
   `).join('');
   _libraryCache = grid.innerHTML;
+
+  // Disable hover effects while scrolling to prevent jank
+  let _libScrollTimer = null;
+  grid.addEventListener('scroll', () => {
+    grid.classList.add('is-scrolling');
+    clearTimeout(_libScrollTimer);
+    _libScrollTimer = setTimeout(() => grid.classList.remove('is-scrolling'), 120);
+  }, { passive: true });
 }
 
 function switchImageTab(tab) {
@@ -5853,7 +6117,26 @@ function submitNewProgram(e) {
 
   const isAdmin2 = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
   if (!isAdmin2 && budget > 0) {
-    _submitProgramApprovalRequest(newProgram, budget);
+    const fundingSource = document.getElementById('np-fund-self')?.checked ? 'self' : 'request';
+    if (fundingSource === 'self') {
+      const avail = currentUser?.points_to_give ?? 0;
+      if (avail < budget) {
+        showErrorToast(`No tenés suficientes puntos (tenés ${avail}, necesitás ${budget}).`);
+        return;
+      }
+      // Deduct immediately from employee wallet
+      currentUser.points_to_give = avail - budget;
+      if (isImpersonating) {
+        // auth.uid() is the superadmin — deduct from the impersonated employee directly
+        window.dataSdk.deductPointsFor(currentUser.__backendId, budget).catch(_log);
+        const empRecord = allUsers.find(u => u.__backendId === currentUser.__backendId);
+        if (empRecord) empRecord.points_to_give = currentUser.points_to_give;
+      } else {
+        window.dataSdk.deductPoints(budget).catch(_log);
+      }
+      updateAllPointsDisplays();
+    }
+    _submitProgramApprovalRequest(newProgram, budget, null, fundingSource);
     closeNewProgramModal();
     return;
   }
@@ -5877,6 +6160,37 @@ function _loadCustomPrograms() {
     const stored = localStorage.getItem('allay_custom_programs');
     if (stored) companyPrograms.push(...JSON.parse(stored));
   } catch (_) {}
+}
+
+async function _syncApprovedPrograms() {
+  if (!currentUser?.__backendId || !window.approvalsSdk) return;
+  const { data } = await window.approvalsSdk.getProcessedForUser(currentUser.__backendId);
+  if (!data.length) return;
+
+  let changed = false;
+  data.forEach(row => {
+    const req = row.data || {};
+    const pendingId = req.pendingProgramId;
+    if (!pendingId) return;
+    const idx = companyPrograms.findIndex(p => p.id === pendingId);
+    if (idx === -1) return;
+
+    if (row.status === 'approved') {
+      companyPrograms[idx].pending = false;
+      companyPrograms[idx].active  = true;
+      changed = true;
+    } else if (row.status === 'rejected') {
+      companyPrograms.splice(idx, 1);
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    _saveCustomPrograms();
+    renderHomeProgramsWidget();
+    renderProgramsInModal();
+    if (currentPage === 'programs') renderProgramsPage();
+  }
 }
 
 function _saveGlobalOverrides() {
@@ -5947,6 +6261,129 @@ function confirmDeleteProgram() {
   renderHomeProgramsWidget();
   renderProgramsInModal();
   showSuccessToast('Programa eliminado');
+}
+
+// ── Superadmin: eliminar cualquier programa con motivo ──────────────────────
+let _saDeleteProgramId  = null;
+let _saDeleteRequestId  = null;
+let _saDeleteCompanyId  = null;
+
+function openSaDeleteProgramModal(programId, programName, requestId = null, companyId = null) {
+  _saDeleteProgramId = programId;
+  _saDeleteRequestId = requestId;
+  _saDeleteCompanyId = companyId;
+  document.getElementById('sa-delete-program-name').textContent = programName;
+  document.getElementById('sa-delete-reason').value = '';
+  document.getElementById('sa-delete-reason-error').classList.add('hidden');
+  document.getElementById('sa-delete-program-modal').classList.remove('hidden');
+  lucide.createIcons();
+  setTimeout(() => document.getElementById('sa-delete-reason').focus(), 100);
+}
+
+function closeSaDeleteProgramModal() {
+  document.getElementById('sa-delete-program-modal').classList.add('hidden');
+  _saDeleteProgramId = null;
+  _saDeleteRequestId = null;
+  _saDeleteCompanyId = null;
+}
+
+async function confirmSaDeleteProgram() {
+  const reason = document.getElementById('sa-delete-reason').value.trim();
+  if (!reason) {
+    document.getElementById('sa-delete-reason-error').classList.remove('hidden');
+    return;
+  }
+
+  const programName = document.getElementById('sa-delete-program-name').textContent;
+  const prog        = companyPrograms.find(p => p.id === _saDeleteProgramId);
+  const companyId   = _saDeleteCompanyId || prog?.company_id || currentUser?.company_id;
+  const budget      = Number(prog?.budget) || 0;
+
+  // Find associated request (queue or history) to determine funding source
+  const allReqs   = [..._approvalsQueue, ..._approvalsHistory];
+  const assocReq  = _saDeleteRequestId
+    ? allReqs.find(r => r.id === _saDeleteRequestId)
+    : allReqs.find(r => r.pendingProgramId === _saDeleteProgramId);
+  const funding   = assocReq?.fundingSource || 'request';
+  const isPending = prog?.pending === true;
+  const isApproved = prog?.active === true;
+
+  // ── Refund logic ──────────────────────────────────────────────────────────
+  if (budget > 0 && window.dataSdk) {
+    if (funding === 'self') {
+      // Employee self-funded — always refund to creator
+      const creatorId = prog?.createdBy || assocReq?.requestedByUserId;
+      if (creatorId) {
+        await window.dataSdk.refundPoints(creatorId, budget).catch(_log);
+        const u = allUsers.find(u => u.__backendId === creatorId);
+        if (u) u.points_to_give = (u.points_to_give || 0) + budget;
+        if (creatorId === currentUser?.__backendId) {
+          currentUser.points_to_give = (currentUser.points_to_give || 0) + budget;
+          updateAllPointsDisplays();
+        }
+      }
+    } else if (isApproved) {
+      // Admin-funded and already approved — refund to company admin(s)
+      const companyAdmins = allUsers.filter(u =>
+        u.company_id === companyId &&
+        (u.role === 'admin' || u.role === 'superadmin') &&
+        u.__backendId
+      );
+      // Refund to first admin found (the one who would have approved)
+      const adminToRefund = companyAdmins[0];
+      if (adminToRefund) {
+        await window.dataSdk.refundPoints(adminToRefund.__backendId, budget).catch(_log);
+        adminToRefund.points_to_give = (adminToRefund.points_to_give || 0) + budget;
+        if (adminToRefund.__backendId === currentUser?.__backendId) {
+          currentUser.points_to_give = adminToRefund.points_to_give;
+          updateAllPointsDisplays();
+        }
+      }
+    }
+    // isPending + request funding: admin never paid yet, no refund needed
+  }
+
+  // Remove from local programs
+  companyPrograms = companyPrograms.filter(p => p.id !== _saDeleteProgramId);
+  try { localStorage.removeItem(_getBudgetKey(_saDeleteProgramId)); } catch (_) {}
+  _saveCustomPrograms();
+
+  // Cancel the pending request in Supabase if applicable
+  const reqIdToCancel = _saDeleteRequestId || assocReq?.id;
+  if (reqIdToCancel && window.approvalsSdk) {
+    window.approvalsSdk.updateStatus(reqIdToCancel, 'rejected', currentUser?.__backendId).catch(_log);
+    _approvalsQueue   = _approvalsQueue.filter(r => r.id !== reqIdToCancel);
+    _approvalsHistory = _approvalsHistory.filter(r => r.id !== reqIdToCancel);
+  }
+
+  // Notify all admins of the company
+  const admins = allUsers.filter(u =>
+    u.company_id === companyId &&
+    (u.role === 'admin' || u.role === 'superadmin') &&
+    u.__backendId !== currentUser?.__backendId
+  );
+  const refundNote = budget > 0 && (funding === 'self' || isApproved)
+    ? ` Se devolvieron ${budget} pts a la billetera ${funding === 'self' ? 'del empleado' : 'del administrador'}.`
+    : '';
+  if (admins.length && window.notificationSdk) {
+    window.notificationSdk.send(admins.map(a => ({
+      user_id: a.__backendId,
+      type:    'program_deleted_by_superadmin',
+      data:    {
+        program_name:  programName,
+        reason,
+        deleted_by:    currentUser?.name || 'Superadmin',
+        refund_note:   refundNote,
+      },
+    }))).catch(_log);
+  }
+
+  closeSaDeleteProgramModal();
+  renderProgramsPage();
+  renderHomeProgramsWidget();
+  renderProgramsInModal();
+  if (currentPage === 'approvals') renderApprovalsPage();
+  showSuccessToast(`Programa "${programName}" eliminado${refundNote}`);
 }
 
 // ------------------------------------------------------------

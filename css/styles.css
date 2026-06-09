@@ -1,5 +1,15 @@
 * { font-family: 'Plus Jakarta Sans', sans-serif; }
 
+/* Disable hover transitions while scrolling the image library */
+#img-panel-library.is-scrolling * {
+  pointer-events: none !important;
+  transition: none !important;
+}
+#img-panel-library img {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
 /* Comment contenteditable — autofill-proof replacement for <input> */
 .comment-editable {
   outline: none;
