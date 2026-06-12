@@ -70,55 +70,88 @@ Deno.serve(async (req) => {
     .eq('id', profile.company_id)
     .maybeSingle();
 
-  const resendKey = Deno.env.get('RESEND_API_KEY');
-  if (!resendKey) {
-    return new Response(JSON.stringify({ error: 'RESEND_API_KEY not configured' }), {
+  const companyLabel = company?.name || profile.company_id;
+  const now = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+
+  // Registrar la solicitud en la base de datos
+  const { data: request, error: requestError } = await adminClient
+    .from('points_purchase_requests')
+    .insert({
+      company_id:   profile.company_id,
+      requested_by: user.id,
+      points,
+      status:       'pending',
+    })
+    .select('id')
+    .single();
+
+  if (requestError) {
+    return new Response(JSON.stringify({ error: requestError.message }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  const companyLabel = company?.name || profile.company_id;
-  const now = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+  // Notificar a todos los superadmins
+  const { data: superadmins } = await adminClient
+    .from('profiles')
+    .select('id')
+    .eq('role', 'superadmin');
 
-  const html = `
-    <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px;background:#f9f9f9;border-radius:12px;">
-      <h2 style="color:#7c3aed;margin-bottom:4px;">Nueva solicitud de puntos</h2>
-      <p style="color:#6b7280;margin-top:0;font-size:14px;">${now}</p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
-      <table style="width:100%;font-size:15px;color:#374151;border-collapse:collapse;">
-        <tr><td style="padding:8px 0;font-weight:600;width:160px;">Empresa</td><td>${companyLabel}</td></tr>
-        <tr><td style="padding:8px 0;font-weight:600;">Company ID</td><td style="font-family:monospace;font-size:13px;">${profile.company_id}</td></tr>
-        <tr><td style="padding:8px 0;font-weight:600;">Admin</td><td>${profile.name}</td></tr>
-        <tr><td style="padding:8px 0;font-weight:600;">Email admin</td><td>${profile.email}</td></tr>
-        <tr><td style="padding:8px 0;font-weight:600;">Puntos solicitados</td><td style="font-size:20px;font-weight:700;color:#7c3aed;">${points.toLocaleString('es-AR')}</td></tr>
-      </table>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
-      <p style="font-size:13px;color:#9ca3af;margin:0;">Este mail fue generado automáticamente por Allay.</p>
-    </div>
-  `;
-
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${resendKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: 'Allay <onboarding@resend.dev>',
-      to: ['allay.corporate@gmail.com'],
-      subject: `[Allay] Solicitud de ${points.toLocaleString('es-AR')} puntos — ${companyLabel}`,
-      html,
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    return new Response(JSON.stringify({ error: err }), {
-      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+  if (superadmins && superadmins.length > 0) {
+    await adminClient.from('notifications').insert(superadmins.map((sa) => ({
+      user_id: sa.id,
+      type:    'points_purchase_request',
+      data: {
+        request_id:     request.id,
+        company_id:     profile.company_id,
+        company_name:   companyLabel,
+        requester_name: profile.name,
+        points,
+      },
+    })));
   }
 
-  return new Response(JSON.stringify({ ok: true }), {
+  const resendKey = Deno.env.get('RESEND_API_KEY');
+  if (resendKey) {
+    const html = `
+      <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px;background:#f9f9f9;border-radius:12px;">
+        <h2 style="color:#7c3aed;margin-bottom:4px;">Nueva solicitud de puntos</h2>
+        <p style="color:#6b7280;margin-top:0;font-size:14px;">${now}</p>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
+        <table style="width:100%;font-size:15px;color:#374151;border-collapse:collapse;">
+          <tr><td style="padding:8px 0;font-weight:600;width:160px;">Empresa</td><td>${companyLabel}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:600;">Company ID</td><td style="font-family:monospace;font-size:13px;">${profile.company_id}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:600;">Admin</td><td>${profile.name}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:600;">Email admin</td><td>${profile.email}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:600;">Puntos solicitados</td><td style="font-size:20px;font-weight:700;color:#7c3aed;">${points.toLocaleString('es-AR')}</td></tr>
+        </table>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
+        <p style="font-size:13px;color:#9ca3af;margin:0;">Este mail fue generado automáticamente por Allay.</p>
+      </div>
+    `;
+
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${resendKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'Allay <onboarding@resend.dev>',
+        to: ['allay.corporate@gmail.com'],
+        subject: `[Allay] Solicitud de ${points.toLocaleString('es-AR')} puntos — ${companyLabel}`,
+        html,
+      }),
+    });
+
+    if (!res.ok) {
+      console.log('[send-points-request] Resend error:', await res.text());
+    }
+  } else {
+    console.log('[send-points-request] RESEND_API_KEY not configured, skipping email');
+  }
+
+  return new Response(JSON.stringify({ ok: true, request_id: request.id }), {
     status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 });

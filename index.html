@@ -53,7 +53,7 @@
     }
   </script>
 
-  <script src="_sdk/data_sdk.js?v=39" type="text/javascript"></script>
+  <script src="_sdk/data_sdk.js?v=42" type="text/javascript"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
@@ -2913,6 +2913,18 @@
 
   <div class="flex-1 p-4 md:p-6 max-w-5xl mx-auto w-full">
 
+    <!-- Pending request banner (admin) -->
+    <div id="points-request-banner" class="hidden mb-6"></div>
+
+    <!-- Pending requests (superadmin only) -->
+    <div id="points-superadmin-requests" class="hidden bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-6">
+      <div class="px-5 py-4 border-b border-gray-50">
+        <h3 class="font-bold text-gray-800 text-sm">Solicitudes de compra de puntos</h3>
+        <p class="text-xs text-gray-400 mt-0.5">Pendientes de aprobación de todas las empresas</p>
+      </div>
+      <div id="points-superadmin-requests-list" class="divide-y divide-gray-50"></div>
+    </div>
+
     <!-- Wallet card -->
     <div class="bg-violet-500 rounded-2xl p-6 text-white mb-6 shadow-lg">
       <div class="flex items-center gap-3 mb-5">
@@ -3057,7 +3069,7 @@
   </div>
 </div>
 
-<script src="js/app.js?v=126"></script>
-<script src="js/analytics.js?v=1"></script>
+<script src="js/app.js?v=130"></script>
+<script src="js/analytics.js?v=3"></script>
 </body>
 </html>

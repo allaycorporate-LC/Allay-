@@ -414,6 +414,42 @@ window.approvalsSdk = {
   },
 };
 
+// ─── Points Purchase Requests SDK ──────────────────────────────────────────────
+window.pointsRequestSdk = {
+  // Última solicitud de la empresa (para mostrar estado en Gestión de puntos)
+  async getLatestForCompany(companyId) {
+    const { data, error } = await _sb
+      .from('points_purchase_requests')
+      .select('*')
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) _log('pointsRequest getLatestForCompany error:', error.message);
+    return { isOk: !error, data: data || null };
+  },
+
+  // Todas las solicitudes pendientes (superadmin)
+  async getAllPending() {
+    const { data, error } = await _sb
+      .from('points_purchase_requests')
+      .select('*')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+    if (error) _log('pointsRequest getAllPending error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+
+  async updateStatus(id, status, processedByUserId) {
+    const { error } = await _sb
+      .from('points_purchase_requests')
+      .update({ status, processed_at: new Date().toISOString(), processed_by: processedByUserId || null })
+      .eq('id', id);
+    if (error) _log('pointsRequest updateStatus error:', error.message);
+    return { isOk: !error };
+  },
+};
+
 // ─── Auto Recognition SDK ─────────────────────────────────────────────────────
 window.autoRecognitionSdk = {
   async getSettings(companyId) {
@@ -569,7 +605,7 @@ window.notificationSdk = {
 window.rewardSdk = {
   async list(companyId) {
     const { data, error } = await _sb.from('rewards')
-      .select('*').eq('company_id', companyId).eq('available', true)
+      .select('*').or(`company_id.eq.${companyId},company_id.is.null`).eq('available', true)
       .order('points_cost');
     if (error) _log('rewards list error:', error.message);
     return { isOk: !error, data: data || [] };
@@ -579,6 +615,28 @@ window.rewardSdk = {
     const { data, error } = await _sb.rpc('redeem_reward', { p_reward_id: rewardId });
     if (error) _log('redeem_reward error:', error.message);
     return { isOk: !error, id: data, error };
+  },
+
+  async listAll() {
+    const { data, error } = await _sb.from('rewards')
+      .select('*').order('points_cost');
+    if (error) _log('rewards listAll error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+
+  async updateStock(rewardId, stock) {
+    const { error } = await _sb.from('rewards')
+      .update({ stock }).eq('id', rewardId);
+    if (error) _log('rewards updateStock error:', error.message);
+    return { isOk: !error, error };
+  },
+
+  async redemptionCounts() {
+    const { data, error } = await _sb.from('redemptions').select('reward_id');
+    if (error) { _log('redemption counts error:', error.message); return {}; }
+    const counts = {};
+    (data || []).forEach(r => { counts[r.reward_id] = (counts[r.reward_id] || 0) + 1; });
+    return counts;
   }
 };
 

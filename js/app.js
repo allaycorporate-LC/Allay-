@@ -4382,6 +4382,15 @@ function renderNotificationsDropdown() {
     } else if (n.type === 'program_deleted_by_superadmin') {
       icon = 'shield-off'; iconColor = 'red';
       text = `El programa <strong>${esc(n.data?.program_name)}</strong> fue eliminado por <span class="font-semibold">${esc(n.data?.deleted_by)}</span>. Motivo: "${esc(n.data?.reason)}"${n.data?.refund_note ? ` <span class="text-green-600">${esc(n.data.refund_note)}</span>` : ''}`;
+    } else if (n.type === 'points_purchase_request') {
+      icon = 'coins'; iconColor = 'violet';
+      text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó comprar <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> para ${esc(n.data?.company_name || n.data?.company_id || 'su empresa')}`;
+    } else if (n.type === 'points_purchase_approved') {
+      icon = 'check-circle'; iconColor = 'green';
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> fue aprobada`;
+    } else if (n.type === 'points_purchase_rejected') {
+      icon = 'x-circle'; iconColor = 'red';
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> fue rechazada`;
     } else if (n.type === 'csv_request') {
       icon = 'file-up'; iconColor = 'amber';
       text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó cargar <strong>${n.data?.row_count || '?'} empleados</strong> (${esc(n.data?.file_name || 'CSV')})`;
@@ -4439,6 +4448,15 @@ function renderNotificationsPage() {
     } else if (n.type === 'program_deleted_by_superadmin') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="shield-off" class="w-5 h-5 text-red-500"></i></div>`;
       text = `El programa <strong>${esc(n.data?.program_name)}</strong> fue eliminado por <span class="font-semibold">${esc(n.data?.deleted_by)}</span>.<br><span class="text-gray-500">Motivo: "${esc(n.data?.reason)}"</span>${n.data?.refund_note ? `<br><span class="text-green-600 text-xs">${esc(n.data.refund_note)}</span>` : ''}`;
+    } else if (n.type === 'points_purchase_request') {
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center shrink-0"><i data-lucide="coins" class="w-5 h-5 text-violet-500"></i></div>`;
+      text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó comprar <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> para <strong>${esc(n.data?.company_name || n.data?.company_id || 'su empresa')}</strong>`;
+    } else if (n.type === 'points_purchase_approved') {
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0"><i data-lucide="check-circle" class="w-5 h-5 text-green-500"></i></div>`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> fue aprobada. Los puntos se acreditarán a la brevedad.`;
+    } else if (n.type === 'points_purchase_rejected') {
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="x-circle" class="w-5 h-5 text-red-500"></i></div>`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> fue rechazada.`;
     } else if (n.type === 'csv_request') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0"><i data-lucide="file-up" class="w-5 h-5 text-amber-500"></i></div>`;
       text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó cargar <strong>${n.data?.row_count || '?'} empleados</strong> · ${esc(n.data?.file_name || 'CSV')} · ${esc(n.data?.company_id || '')}`;
@@ -4461,6 +4479,10 @@ function renderNotificationsPage() {
           <p class="text-xs text-gray-400 mt-1"><i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${formatTimeAgo(n.created_at)}</p>
         </div>
         <div class="flex gap-1 shrink-0">
+          ${(n.type === 'points_purchase_request' && !n.read && n.data?.request_id) ? `
+            <button onclick='event.stopPropagation(); rejectPointsPurchaseRequest(${JSON.stringify(n.data.request_id)}); markNotificationRead(${idJson})' class="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition">Rechazar</button>
+            <button onclick='event.stopPropagation(); approvePointsPurchaseRequest(${JSON.stringify(n.data.request_id)}); markNotificationRead(${idJson})' class="px-2.5 py-1.5 rounded-lg bg-violet-500 text-white text-xs font-semibold hover:opacity-90 transition">Aprobar</button>
+          ` : ''}
           ${!n.read ? `<button onclick='event.stopPropagation(); markNotificationRead(${idJson})' class="p-1.5 rounded-lg hover:bg-violet-100 transition" title="Marcar como leída"><i data-lucide="check" class="w-3.5 h-3.5 text-violet-500"></i></button>` : ''}
           <button onclick='event.stopPropagation(); handleNotificationClick(${idJson})' class="p-1.5 rounded-lg hover:bg-gray-100 transition" title="Ir al contenido"><i data-lucide="arrow-right" class="w-3.5 h-3.5 text-gray-400"></i></button>
         </div>
@@ -4518,6 +4540,9 @@ async function handleNotificationClick(id) {
   } else if (n.type === 'program_approved' || n.type === 'program_rejected') {
     _closeAllOverlays();
     openProgramsPage();
+  } else if (n.type === 'points_purchase_request' || n.type === 'points_purchase_approved' || n.type === 'points_purchase_rejected') {
+    _closeAllOverlays();
+    openPointsPage();
   } else if (n.type === 'recognition' || n.type === 'reaction' || n.type === 'comment') {
     const recId = n.data?.recognition_id;
     if (recId) {
@@ -4554,7 +4579,7 @@ async function openStore() {
       <div class="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-5">
         <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Tus puntos disponibles</p>
         <div class="flex items-baseline gap-2 mb-1">
-          <span class="text-5xl font-black text-gray-900">${pts}</span>
+          <span id="store-hero-points" class="text-5xl font-black text-gray-900">${pts}</span>
           <span class="text-lg font-bold text-violet-500">pts</span>
         </div>
         <p class="text-sm text-gray-400 mt-1">Elegí cómo disfrutar tu reconocimiento.</p>
@@ -4567,31 +4592,69 @@ function closeStore() {
   document.getElementById('store-page').classList.add('hidden');
 }
 
+function _updateStoreHeaderPoints() {
+  if (!currentUser) return;
+  const pts = currentUser.points_to_redeem || 0;
+  const headerEl = document.getElementById('store-points-display');
+  if (headerEl) headerEl.textContent = `${pts} pts`;
+  const heroEl = document.getElementById('store-hero-points');
+  if (heroEl) heroEl.textContent = pts;
+}
+
 async function renderStore() {
   const container = document.getElementById('store-rewards-container');
   if (!container || !currentUser) return;
   container.innerHTML = '<div class="text-center py-10"><i data-lucide="loader" class="w-8 h-8 animate-spin text-violet-400 mx-auto"></i></div>';
   lucide.createIcons();
 
-  const { isOk, data } = await window.rewardSdk.list(currentUser.company_id);
+  const isSuperadmin = currentUser.role === 'superadmin';
+  const { isOk, data } = isSuperadmin
+    ? await window.rewardSdk.listAll()
+    : await window.rewardSdk.list(currentUser.company_id);
+  const redemptionCounts = isSuperadmin ? await window.rewardSdk.redemptionCounts() : {};
   const pts = currentUser.points_to_redeem || 0;
 
   const CATS = [
-    { key: 'tiempo',       label: 'Tiempo',       emoji: '⏰', desc: 'Recuperá espacio para vos',        dbKeys: ['time_off'] },
-    { key: 'bienestar',    label: 'Bienestar',    emoji: '💪', desc: 'Cuid',                 dbKeys: ['wellness'] },
-    { key: 'crecimiento',  label: 'Crecimiento',  emoji: '🌱', desc: 'Invertí en tu crecimiento',         dbKeys: ['growth', 'learning'] },
-    { key: 'experiencias', label: 'Experiencias', emoji: '🎉', desc: 'Momentos que recordarás',        dbKeys: ['experience', 'gift_card', 'merch', 'general'] },
+    { key: 'escritorio',    label: 'Para tu escritorio', emoji: '☕', bg: '#ede9fe', desc: 'Para tu día a día en la oficina o en casa', dbKeys: ['merch', 'desk'] },
+    { key: 'productividad', label: 'Productividad',      emoji: '📝', bg: '#dbeafe', desc: 'Para organizarte mejor',                    dbKeys: ['office', 'productivity'] },
+    { key: 'kits',          label: 'Kits de bienestar',  emoji: '🌿', bg: '#dcfce7', desc: 'Combos pensados para vos',                  dbKeys: ['wellness'] },
+    { key: 'tiempo',        label: 'Tiempo libre',       emoji: '⏰', bg: '#fef3c7', desc: 'Recuperá espacio para vos',                  dbKeys: ['time_off'] },
+    { key: 'giftcards',     label: 'Gift cards',         emoji: '🎁', bg: '#fce7f3', desc: 'Para gastar donde quieras',                 dbKeys: ['gift_card', 'experience', 'growth', 'learning', 'general'] },
   ];
 
   const PH = {
-    tiempo:       [{ name: 'Tomarte un día libre',       desc: 'Un día para desconectarte y recargar energía. Sin justificación.',  pts: 200, badge: 'Muy elegido' },
-                   { name: 'Trabajar remoto una semana', desc: 'Elegí dónde trabajar durante 5 días hábiles.',                      pts: 350 }],
-    bienestar:    [{ name: 'Sesión de bienestar',        desc: 'Una sesión de meditación, yoga o masajes a tu elección.',           pts: 150, badge: 'Recomendado' },
-                   { name: 'Kit de bienestar personal',  desc: 'Productos de cuidado personal seleccionados para vos.',             pts: 180 }],
-    crecimiento:  [{ name: 'Acceder a un curso',         desc: 'Cualquier curso online de tu área de interés.',                     pts: 300, badge: 'Recomendado' },
-                   { name: 'Sesión de mentoría',         desc: 'Una hora con un referente de tu industria o área.',                 pts: 250 }],
-    experiencias: [{ name: 'Cena para dos',              desc: 'Una experiencia gastronómica para compartir con quien quieras.',    pts: 400 },
-                   { name: 'Entrada a un evento',        desc: 'Cine, teatro, recital o deporte. Vos elegís.',                     pts: 280 }],
+    escritorio: [
+      { name: 'Taza',                                  desc: 'Una taza para acompañar tus mates, cafés o té.',                     pts: 80,  emoji: '☕' },
+      { name: 'Vaso Térmico',                          desc: 'Mantené tu bebida fría o caliente por horas.',                       pts: 150, emoji: '🥤' },
+      { name: 'Botella Térmica',                       desc: 'Hidratate todo el día, dentro y fuera de la oficina.',               pts: 180, emoji: '💧' },
+      { name: 'Mate con bombilla',                     desc: 'El combo infaltable para los materos del equipo.',                   pts: 200, emoji: '🧉', badge: 'Muy elegido' },
+      { name: 'Hornito con vela y esencias aromáticas',desc: 'Sumá un toque de aroma y relax a tu espacio.',                       pts: 220, emoji: '🕯️' },
+      { name: 'Apoya muñecas nube',                    desc: 'Comodidad para tus largas jornadas frente a la compu.',              pts: 120, emoji: '☁️' },
+    ],
+    productividad: [
+      { name: 'Anotador con lapicera',                 desc: 'Para anotar tus ideas, siempre a mano.',                             pts: 100, emoji: '🖊️' },
+      { name: 'Cuadernos',                             desc: 'Set de cuadernos para organizar tu día a día.',                      pts: 90,  emoji: '📓' },
+      { name: 'Lapicero con post-it notes',            desc: 'Todo lo que necesitás para tu escritorio en un solo lugar.',         pts: 110, emoji: '🗒️' },
+    ],
+    kits: [
+      { name: 'Kit Energía',                           desc: 'Taza, té, sahumerios y bolitas de sahumación para recargar energía.',pts: 350, emoji: '🔋' },
+      { name: 'Kit Bienestar',                         desc: 'Vela, journal y snacks para tu momento de relax.',                   pts: 380, emoji: '🧘', badge: 'Recomendado' },
+      { name: 'Kit Sport',                             desc: 'Riñonera runner, snacks, vincha runner y bandas de resistencia para entrenar.', pts: 420, emoji: '🏃' },
+    ],
+    tiempo: [
+      { name: 'Medio día libre',                       desc: 'Tomate la tarde o la mañana, vos elegís.',                           pts: 250, emoji: '🌤️' },
+      { name: 'Un día extra de homeoffice en la semana',desc: 'Sumá un día de trabajo remoto extra a tu semana.',                  pts: 200, emoji: '🏠' },
+      { name: 'Salida temprana el viernes',            desc: 'Arrancá el finde un poco antes.',                                    pts: 150, emoji: '🚪' },
+      { name: 'Día libre completo',                    desc: 'Un día entero para vos, sin justificación.',                         pts: 400, emoji: '🌴', badge: 'Más pedido' },
+    ],
+    giftcards: [
+      { name: 'Gift card MercadoLibre $10.000',        desc: 'Para comprar lo que quieras en MercadoLibre.',                       pts: 800,  emoji: '🛒' },
+      { name: 'Gift card MercadoLibre $20.000',        desc: 'El doble de opciones para vos.',                                     pts: 1600, emoji: '🛍️' },
+      { name: 'Gift card Carrefour $10.000',           desc: 'Para tus compras de supermercado.',                                  pts: 800,  emoji: '🛒' },
+      { name: 'Netflix 1 mes',                         desc: 'Un mes de series y películas.',                                      pts: 300,  emoji: '🎬' },
+      { name: 'Spotify Premium 1 mes',                 desc: 'Un mes de música sin límites ni anuncios.',                          pts: 250,  emoji: '🎧' },
+      { name: 'Gift card multimarca',                  desc: 'Elegí entre múltiples marcas para tu canje.',                        pts: 800,  emoji: '🎁', badge: 'Recomendado' },
+    ],
   };
 
   const hasRewards = isOk && data.length > 0;
@@ -4600,7 +4663,7 @@ async function renderStore() {
 
   if (hasRewards) {
     data.forEach(r => {
-      const cat = CATS.find(c => c.dbKeys.includes(r.category)) || CATS[3];
+      const cat = CATS.find(c => c.dbKeys.includes(r.category)) || CATS[CATS.length - 1];
       grouped[cat.key].push({ ...r, isPlaceholder: false });
     });
   } else {
@@ -4625,12 +4688,25 @@ async function renderStore() {
           <span class="text-xs text-gray-400">· ${cat.desc}</span>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          ${grouped[cat.key].map(r => buildStoreRewardCard(r, pts, r.isPlaceholder)).join('')}
+          ${grouped[cat.key].map(r => isSuperadmin
+            ? buildSuperadminRewardCard(r, redemptionCounts[r.id] || 0, cat)
+            : buildStoreRewardCard(r, pts, r.isPlaceholder, cat)).join('')}
         </div>
       </section>
     `).join('');
 
-  container.innerHTML = catBarHtml + sectionsHtml;
+  const adminBannerHtml = isSuperadmin ? `
+    <div class="bg-violet-50 border border-violet-100 text-violet-700 text-xs font-semibold rounded-xl px-4 py-3 mb-5">
+      Vista de administración: gestioná el stock de cada producto y mirá cuántos pedidos tuvo.
+    </div>` : '';
+
+  container.innerHTML = adminBannerHtml + catBarHtml + sectionsHtml;
+}
+
+// Genera una imagen genérica (SVG) para usar como placeholder hasta que se suba una foto real
+function _storePlaceholderImg(emoji, bg) {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect width='100%' height='100%' fill='${bg || '#f3f4f6'}'/><text x='50%' y='50%' font-size='110' text-anchor='middle' dominant-baseline='central'>${emoji || '🎁'}</text></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 function filterStoreCategory(key, btn) {
@@ -4645,18 +4721,22 @@ function filterStoreCategory(key, btn) {
   });
 }
 
-function buildStoreRewardCard(r, userPts, isPlaceholder) {
-  const cost      = r.points_cost ?? r.pts ?? 0;
-  const canAfford = userPts >= cost;
-  const missing   = cost - userPts;
-  const badge     = r.badge || null;
-  const name      = (r.name || '').replace(/'/g, '&#39;');
-  const desc      = r.description || r.desc || '';
-  const id        = r.id || '';
+function buildStoreRewardCard(r, userPts, isPlaceholder, cat) {
+  const cost       = r.points_cost ?? r.pts ?? 0;
+  const canAfford  = userPts >= cost;
+  const missing    = cost - userPts;
+  const badge      = r.badge || null;
+  const name       = (r.name || '').replace(/'/g, '&#39;');
+  const desc       = r.description || r.desc || '';
+  const id         = r.id || '';
+  const imgSrc     = r.image_url || r.img || _storePlaceholderImg(r.emoji || cat?.emoji, cat?.bg);
+  const outOfStock = !isPlaceholder && r.stock !== null && r.stock !== undefined && r.stock <= 0;
+  const canRedeem  = !isPlaceholder && !outOfStock && canAfford;
 
   return `<div class="bg-white rounded-xl border border-gray-100 p-5 flex flex-col gap-3 hover:shadow-md transition relative">
-    ${badge ? `<span class="absolute top-4 right-4 text-[10px] font-bold bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full">${badge}</span>` : ''}
-    <div class="${badge ? 'pr-20' : ''}">
+    ${badge ? `<span class="absolute top-4 right-4 text-[10px] font-bold bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full z-10">${badge}</span>` : ''}
+    <img src="${imgSrc}" alt="${name}" class="w-full h-28 object-cover rounded-lg bg-gray-50">
+    <div>
       <h4 class="font-bold text-gray-800 text-sm leading-snug">${name}</h4>
       <p class="text-xs text-gray-400 mt-1.5 leading-relaxed">${desc}</p>
     </div>
@@ -4666,15 +4746,73 @@ function buildStoreRewardCard(r, userPts, isPlaceholder) {
           <span class="font-black text-violet-600 text-lg">${cost}</span>
           <span class="text-xs text-gray-400">pts</span>
         </div>
-        ${!isPlaceholder && !canAfford  ? `<p class="text-[10px] text-pink-500 font-medium mt-0.5">Te faltan ${missing} pts</p>` : ''}
-        ${!isPlaceholder &&  canAfford  ? `<p class="text-[10px] text-emerald-500 font-medium mt-0.5">Podés canjear esto ✓</p>` : ''}
+        ${!isPlaceholder && outOfStock ? `<p class="text-[10px] text-pink-500 font-medium mt-0.5">Sin stock</p>` : ''}
+        ${!isPlaceholder && !outOfStock && !canAfford  ? `<p class="text-[10px] text-pink-500 font-medium mt-0.5">Te faltan ${missing} pts</p>` : ''}
+        ${!isPlaceholder && !outOfStock &&  canAfford  ? `<p class="text-[10px] text-emerald-500 font-medium mt-0.5">Podés canjear esto ✓</p>` : ''}
       </div>
-      <button ${!isPlaceholder && canAfford ? `onclick="redeemReward('${id}', '${name}', ${cost})"` : 'disabled'}
-        class="px-4 py-1.5 rounded-full text-xs font-bold transition ${!isPlaceholder && canAfford ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}">
-        ${isPlaceholder ? 'Próximamente' : canAfford ? 'Canjear' : 'Sin puntos'}
+      <button ${canRedeem ? `onclick="redeemReward('${id}', '${name}', ${cost})"` : 'disabled'}
+        class="px-4 py-1.5 rounded-full text-xs font-bold transition ${canRedeem ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}">
+        ${isPlaceholder ? 'Próximamente' : outOfStock ? 'Sin stock' : canAfford ? 'Canjear' : 'Sin puntos'}
       </button>
     </div>
   </div>`;
+}
+
+function buildSuperadminRewardCard(r, redemptionCount, cat) {
+  const cost      = r.points_cost ?? 0;
+  const name      = (r.name || '').replace(/'/g, '&#39;');
+  const desc      = r.description || '';
+  const id        = r.id || '';
+  const imgSrc    = r.image_url || _storePlaceholderImg(r.emoji || cat?.emoji, cat?.bg);
+  const stock     = r.stock;
+  const stockLabel = (stock === null || stock === undefined) ? 'Sin límite' : `${stock} unidades`;
+
+  return `<div class="bg-white rounded-xl border border-gray-100 p-5 flex flex-col gap-3 hover:shadow-md transition relative">
+    <img src="${imgSrc}" alt="${name}" class="w-full h-28 object-cover rounded-lg bg-gray-50">
+    <div>
+      <h4 class="font-bold text-gray-800 text-sm leading-snug">${name}</h4>
+      <p class="text-xs text-gray-400 mt-1.5 leading-relaxed">${desc}</p>
+    </div>
+    <div class="flex items-center justify-between mt-auto pt-3 border-t border-gray-50 text-xs">
+      <div>
+        <span class="font-black text-violet-600 text-lg">${cost}</span>
+        <span class="text-gray-400">pts</span>
+      </div>
+      <div class="text-right text-gray-500">
+        <p>Pedidos: <span class="font-bold text-gray-800">${redemptionCount}</span></p>
+        <p>Stock: <span class="font-bold text-gray-800" id="stock-label-${id}">${stockLabel}</span></p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 pt-2 border-t border-gray-50">
+      <input id="stock-input-${id}" type="number" min="0" placeholder="Sin límite" value="${stock ?? ''}"
+        class="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-300">
+      <button onclick='updateRewardStock(${JSON.stringify(id)})'
+        class="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold bg-violet-600 text-white hover:bg-violet-700 transition">
+        Actualizar stock
+      </button>
+    </div>
+  </div>`;
+}
+
+async function updateRewardStock(rewardId) {
+  const input = document.getElementById(`stock-input-${rewardId}`);
+  if (!input) return;
+  const raw = input.value.trim();
+  const stock = raw === '' ? null : parseInt(raw, 10);
+  if (raw !== '' && (isNaN(stock) || stock < 0)) {
+    showErrorToast('Ingresá un número válido');
+    return;
+  }
+
+  const { isOk } = await window.rewardSdk.updateStock(rewardId, stock);
+  if (!isOk) {
+    showErrorToast('Error al actualizar el stock');
+    return;
+  }
+
+  const label = document.getElementById(`stock-label-${rewardId}`);
+  if (label) label.textContent = stock === null ? 'Sin límite' : `${stock} unidades`;
+  showSuccessToast('Stock actualizado');
 }
 
 async function redeemReward(rewardId, name, cost) {
@@ -4685,7 +4823,9 @@ async function redeemReward(rewardId, name, cost) {
 
   const { isOk, error } = await window.rewardSdk.redeem(rewardId);
   if (!isOk) {
-    const msg = error?.message === 'insufficient_points' ? 'No tenés suficientes puntos' : 'Error al canjear';
+    const msg = error?.message === 'insufficient_points' ? 'No tenés suficientes puntos'
+      : error?.message === 'out_of_stock' ? 'Este producto está sin stock'
+      : 'Error al canjear';
     showErrorToast(msg);
     return;
   }
@@ -4693,6 +4833,7 @@ async function redeemReward(rewardId, name, cost) {
   currentUser.points_to_redeem -= cost;
   await window.dataSdk.refresh();
   updateAllPointsDisplays();
+  _updateStoreHeaderPoints();
   await renderStore();
   showSuccessToast(`¡Canjeaste ${name}! -${cost} pts`);
 }
@@ -5345,10 +5486,16 @@ function renderProgramsPage() {
               class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left">
               <i data-lucide="shield-off" class="w-3.5 h-3.5 shrink-0"></i> Eliminar
             </button>` : `
-            <button disabled title="Solo el superadmin puede eliminar programas. Solicitalo a tu superadministrador."
-              class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-300 cursor-not-allowed text-left">
-              <i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i> Eliminar
-            </button>`}
+            <div class="relative group/del">
+              <button disabled
+                class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-300 cursor-not-allowed text-left">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i> Eliminar
+              </button>
+              <div class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-800 text-white text-xs rounded-lg px-3 py-2 opacity-0 group-hover/del:opacity-100 transition-opacity duration-150 z-50 text-center leading-snug shadow-lg">
+                Solo el superadmin puede eliminar programas. Solicitalo a tu superadministrador.
+                <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+              </div>
+            </div>`}
           </div>
         </div>` : ''}
       ${p.global && isSuperadmin ? `

@@ -2280,6 +2280,22 @@ async function renderPointsPage() {
     (allUsers.find(u => u.company_id === companyId)?.company_id || companyId || 'Mi empresa');
   document.getElementById('wallet-company-name').textContent = companyId || 'Mi empresa';
 
+  // Pending/processed purchase request banner (admin view)
+  if (!isSuperadmin && companyId && window.pointsRequestSdk) {
+    const { data: req } = await window.pointsRequestSdk.getLatestForCompany(companyId);
+    _renderPointsRequestBanner(req);
+  } else {
+    document.getElementById('points-request-banner')?.classList.add('hidden');
+  }
+
+  // Pending requests across companies (superadmin view)
+  if (isSuperadmin && window.pointsRequestSdk) {
+    const { data: pending } = await window.pointsRequestSdk.getAllPending();
+    _renderSuperadminPointsRequests(pending);
+  } else {
+    document.getElementById('points-superadmin-requests')?.classList.add('hidden');
+  }
+
   // Points available = sum of points_to_give for company employees
   const companyUsers = isSuperadmin
     ? allUsers
@@ -2406,9 +2422,117 @@ async function submitBuyPoints() {
       },
       body: JSON.stringify({ points: pts }),
     });
-  } catch (_) { /* silently ignore � toast still shows */ }
+  } catch (_) { /* silently ignore */ }
 
   showSuccessToast(`Solicitud de ${pts.toLocaleString('es-AR')} puntos enviada. El equipo de Allay te contactará pronto.`);
+
+  renderPointsPage();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Points purchase requests — banner (admin) & queue (superadmin)
+// ──────────────────────────────────────────────────────────────────────────────
+function _renderPointsRequestBanner(req) {
+  const banner = document.getElementById('points-request-banner');
+  if (!banner) return;
+
+  if (!req || req.status === 'rejected') {
+    banner.classList.add('hidden');
+    banner.innerHTML = '';
+    if (req && req.status === 'rejected') {
+      banner.classList.remove('hidden');
+      banner.innerHTML = `
+        <div class="bg-red-50 border border-red-100 rounded-2xl px-5 py-4 flex items-center gap-3">
+          <i data-lucide="x-circle" class="w-5 h-5 text-red-500 shrink-0"></i>
+          <p class="text-sm text-red-700">Tu solicitud de <strong>${req.points.toLocaleString('es-AR')} pts</strong> fue rechazada. Contactá al equipo de Allay para más información.</p>
+        </div>`;
+      lucide.createIcons();
+    }
+    return;
+  }
+
+  banner.classList.remove('hidden');
+  if (req.status === 'pending') {
+    banner.innerHTML = `
+      <div class="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-4 flex items-center gap-3">
+        <i data-lucide="clock" class="w-5 h-5 text-amber-500 shrink-0"></i>
+        <p class="text-sm text-amber-700">Solicitud de <strong>${req.points.toLocaleString('es-AR')} pts</strong> en proceso. El equipo de Allay te contactará para coordinar el pago.</p>
+      </div>`;
+  } else if (req.status === 'approved') {
+    banner.innerHTML = `
+      <div class="bg-green-50 border border-green-100 rounded-2xl px-5 py-4 flex items-center gap-3">
+        <i data-lucide="check-circle" class="w-5 h-5 text-green-500 shrink-0"></i>
+        <p class="text-sm text-green-700">Tu solicitud de <strong>${req.points.toLocaleString('es-AR')} pts</strong> fue aprobada. Los puntos se acreditarán a la brevedad.</p>
+      </div>`;
+  }
+  lucide.createIcons();
+}
+
+let _superadminPointsCompanies = null;
+
+async function _renderSuperadminPointsRequests(pending) {
+  const wrap = document.getElementById('points-superadmin-requests');
+  const list = document.getElementById('points-superadmin-requests-list');
+  if (!wrap || !list) return;
+
+  if (!pending || pending.length === 0) {
+    wrap.classList.add('hidden');
+    list.innerHTML = '';
+    return;
+  }
+  wrap.classList.remove('hidden');
+
+  if (!_superadminPointsCompanies) {
+    const { data } = await window.companySdk.list();
+    _superadminPointsCompanies = data || [];
+  }
+
+  list.innerHTML = pending.map(req => {
+    const company = _superadminPointsCompanies.find(c => c.id === req.company_id);
+    const requester = allUsers.find(u => u.__backendId === req.requested_by);
+    return `
+    <div class="flex items-center gap-4 px-5 py-3">
+      <div class="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center shrink-0">
+        <i data-lucide="coins" class="w-4 h-4 text-violet-500"></i>
+      </div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium text-gray-800 truncate">${esc(company?.name || req.company_id)}</p>
+        <p class="text-xs text-gray-400 truncate">${esc(requester?.name || 'Admin')} · ${formatTimeAgo(req.created_at)}</p>
+      </div>
+      <span class="text-sm font-bold text-violet-700 shrink-0">${req.points.toLocaleString('es-AR')} pts</span>
+      <div class="flex gap-2 shrink-0">
+        <button onclick='rejectPointsPurchaseRequest(${JSON.stringify(req.id)})' class="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition">Rechazar</button>
+        <button onclick='approvePointsPurchaseRequest(${JSON.stringify(req.id)})' class="px-3 py-1.5 rounded-lg bg-violet-500 text-white text-xs font-semibold hover:opacity-90 transition">Aprobar</button>
+      </div>
+    </div>`;
+  }).join('');
+  lucide.createIcons();
+}
+
+async function approvePointsPurchaseRequest(id) {
+  await _processPointsPurchaseRequest(id, 'approved');
+}
+
+async function rejectPointsPurchaseRequest(id) {
+  await _processPointsPurchaseRequest(id, 'rejected');
+}
+
+async function _processPointsPurchaseRequest(id, status) {
+  const { isOk } = await window.pointsRequestSdk.updateStatus(id, status, currentUser?.__backendId);
+  if (!isOk) { showErrorToast('No se pudo actualizar la solicitud'); return; }
+
+  // Notify the requesting admin
+  const { data: req } = await _sb.from('points_purchase_requests').select('*').eq('id', id).maybeSingle();
+  if (req?.requested_by) {
+    window.notificationSdk.send([{
+      user_id: req.requested_by,
+      type:    status === 'approved' ? 'points_purchase_approved' : 'points_purchase_rejected',
+      data:    { points: req.points },
+    }]).catch(_log);
+  }
+
+  showSuccessToast(status === 'approved' ? 'Solicitud aprobada' : 'Solicitud rechazada');
+  renderPointsPage();
 }
 
 // ����������������������������������������������������������������������������������
