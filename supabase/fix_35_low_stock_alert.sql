@@ -9,10 +9,14 @@
 -- PASO 1: Desplegar la edge function SIN verificación de JWT:
 --         supabase functions deploy send-low-stock-alert --no-verify-jwt
 --
--- PASO 2: Configurar el secreto compartido (mismo valor que se usa abajo):
---         supabase secrets set LOW_STOCK_ALERT_SECRET=dd4b7c5d9dc230f14e81d3f44fb6fa30ab8c7d57c50b3c2fc900251fa4fb1261
+-- PASO 2: Configurar el secreto compartido:
+--         supabase secrets set LOW_STOCK_ALERT_SECRET=<tu-secreto>
 --
--- PASO 3: Correr este SQL en el SQL Editor.
+-- PASO 3: Reemplazar YOUR_LOW_STOCK_SECRET abajo por el mismo valor
+--         que usaste en el paso 2 y correr este SQL en el SQL Editor.
+--
+-- IMPORTANTE: nunca commitear el secreto real a GitHub.
+--             Este archivo debe usar siempre el placeholder YOUR_LOW_STOCK_SECRET.
 -- ══════════════════════════════════════════════════════════════════════════════
 
 create extension if not exists pg_net;
@@ -24,7 +28,7 @@ begin
      and (old.stock is null or old.stock > 3) then
     perform net.http_post(
       url     := 'https://smuwnjpmpmwfuysrxkaa.supabase.co/functions/v1/send-low-stock-alert',
-      headers := '{"Content-Type":"application/json","Authorization":"Bearer dd4b7c5d9dc230f14e81d3f44fb6fa30ab8c7d57c50b3c2fc900251fa4fb1261"}'::jsonb,
+      headers := '{"Content-Type":"application/json","Authorization":"Bearer YOUR_LOW_STOCK_SECRET"}'::jsonb,
       body    := jsonb_build_object('reward_id', new.id, 'name', new.name, 'stock', new.stock)
     );
   end if;
