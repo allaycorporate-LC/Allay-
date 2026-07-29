@@ -295,7 +295,9 @@ window.recognitionSdk = {
 
   async forCompany(companyId, limit = 300) {
     let query = _sb.from('recognitions')
-      .select('id, program, from_user:profiles!recognitions_from_user_id_fkey(id, name)')
+      .select(`id, points, program, created_at,
+        from_user:profiles!recognitions_from_user_id_fkey(id, name),
+        to_user:profiles!recognitions_to_user_id_fkey(id, name)`)
       .order('created_at', { ascending: false })
       .limit(limit);
     if (companyId) query = query.eq('company_id', companyId);
@@ -418,6 +420,18 @@ window.approvalsSdk = {
 window.pointsRequestSdk = {
   // Última solicitud de la empresa (para mostrar estado en Gestión de puntos)
   async getLatestForCompany(companyId) {
+    // Primero buscar si hay alguna solicitud pendiente (tiene prioridad visual)
+    const { data: pending } = await _sb
+      .from('points_purchase_requests')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (pending) return { isOk: true, data: pending };
+
+    // Si no hay pendiente, mostrar la más reciente (aprobada/rechazada)
     const { data, error } = await _sb
       .from('points_purchase_requests')
       .select('*')
@@ -631,6 +645,13 @@ window.rewardSdk = {
     return { isOk: !error, error };
   },
 
+  async updateImage(rewardId, imageUrl) {
+    const { error } = await _sb.from('rewards')
+      .update({ image_url: imageUrl }).eq('id', rewardId);
+    if (error) _log('rewards updateImage error:', error.message);
+    return { isOk: !error, error };
+  },
+
   async redemptionCounts() {
     const { data, error } = await _sb.from('redemptions').select('reward_id');
     if (error) { _log('redemption counts error:', error.message); return {}; }
@@ -650,9 +671,16 @@ window.programsSdk = {
     return { isOk: !error, data: data || [] };
   },
 
-  async create(companyId, name, emoji) {
+  async listAll() {
     const { data, error } = await _sb.from('programs')
-      .insert({ company_id: companyId, name, emoji })
+      .select('*').order('company_id').order('created_at');
+    if (error) _log('programs listAll error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+
+  async create(fields) {
+    const { data, error } = await _sb.from('programs')
+      .insert(fields)
       .select().single();
     if (error) _log('programs create error:', error.message);
     return { isOk: !error, data };
@@ -667,6 +695,20 @@ window.programsSdk = {
   async delete(id) {
     const { error } = await _sb.from('programs').delete().eq('id', id);
     if (error) _log('programs delete error:', error.message);
+    return { isOk: !error };
+  },
+
+  async listOverrides(companyId) {
+    const { data, error } = await _sb.from('program_overrides')
+      .select('*').eq('company_id', companyId);
+    if (error) _log('program_overrides list error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+
+  async upsertOverride(companyId, programKey, fields) {
+    const { error } = await _sb.from('program_overrides')
+      .upsert({ company_id: companyId, program_key: programKey, ...fields }, { onConflict: 'company_id,program_key' });
+    if (error) _log('program_overrides upsert error:', error.message);
     return { isOk: !error };
   }
 };

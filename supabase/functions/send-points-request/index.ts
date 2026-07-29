@@ -33,29 +33,42 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Leer perfil desde la base de datos — no confiar en datos del cliente
-  const { data: profile, error: profileError } = await adminClient
+  // Leer perfil del caller desde la base de datos
+  const { data: callerProfile, error: profileError } = await adminClient
     .from('profiles')
     .select('name, email, role, company_id')
     .eq('id', user.id)
     .single();
 
-  if (profileError || !profile) {
+  if (profileError || !callerProfile) {
     return new Response(JSON.stringify({ error: 'Profile not found' }), {
       status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
   // Solo admins y superadmins pueden solicitar puntos
-  if (profile.role !== 'admin' && profile.role !== 'superadmin') {
+  if (callerProfile.role !== 'admin' && callerProfile.role !== 'superadmin') {
     return new Response(JSON.stringify({ error: 'Forbidden' }), {
       status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  // Leer cantidad de puntos del body (único dato que viene del cliente)
+  // Leer cantidad de puntos del body
   const body = await req.json().catch(() => ({}));
   const points = Number(body.points);
+
+  // Si el superadmin está impersonando un admin, usar el perfil del admin impersonado
+  let profile = callerProfile;
+  if (callerProfile.role === 'superadmin' && body.impersonated_user_id) {
+    const { data: impProfile } = await adminClient
+      .from('profiles')
+      .select('name, email, role, company_id')
+      .eq('id', body.impersonated_user_id)
+      .single();
+    if (impProfile && (impProfile.role === 'admin' || impProfile.role === 'employee')) {
+      profile = impProfile;
+    }
+  }
   const MAX_POINTS_REQUEST = 50000;
   if (!points || points < 100 || points > MAX_POINTS_REQUEST || !Number.isInteger(points)) {
     return new Response(JSON.stringify({ error: 'Invalid points value. Must be integer between 100 and 50000.' }), {

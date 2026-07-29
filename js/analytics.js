@@ -2354,6 +2354,108 @@ async function renderPointsPage() {
       <span class="text-sm font-bold text-violet-700 shrink-0">${pts.toLocaleString('es-AR')} pts</span>
     </div>`;
   }).join('');
+
+  // Programs budget section
+  _renderPointsPrograms();
+
+  // Movements section
+  _renderPointsMovements(recs || []);
+}
+
+function _renderPointsPrograms() {
+  const section = document.getElementById('wallet-programs-section');
+  const listEl  = document.getElementById('wallet-programs-list');
+  if (!section || !listEl) return;
+
+  const isSuperadmin = currentUser?.role === 'superadmin' && !isImpersonating;
+  const myCompanyId  = currentUser?.company_id;
+  const programs = (window.companyPrograms || []).filter(p =>
+    p.custom && p.active && !p.pending && (p.budget || 0) > 0 &&
+    (isSuperadmin || !p.company_id || p.company_id === myCompanyId)
+  );
+
+  if (!programs.length) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  section.classList.remove('hidden');
+  const maxBudget = Math.max(...programs.map(p => p.budget || 0), 1);
+
+  listEl.innerHTML = programs.map(p => {
+    const total     = p.budget || 0;
+    const remaining = p.budget_remaining !== null && p.budget_remaining !== undefined
+      ? p.budget_remaining : total;
+    const used      = Math.max(0, total - remaining);
+    const pct       = total > 0 ? Math.round((used / total) * 100) : 0;
+    const barPct    = Math.round((total / maxBudget) * 100);
+
+    return `
+    <div class="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition">
+      <div class="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center text-lg shrink-0">${p.emoji || '⭐'}</div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium text-gray-800 truncate">${p.name}</p>
+        <div class="flex items-center gap-2 mt-1">
+          <div class="flex-1 bg-gray-100 rounded-full h-1.5">
+            <div class="bg-violet-400 h-1.5 rounded-full transition-all" style="width:${pct}%"></div>
+          </div>
+          <span class="text-[10px] text-gray-400 shrink-0">${pct}% usado</span>
+        </div>
+      </div>
+      <div class="text-right shrink-0">
+        <p class="text-sm font-bold text-violet-700">${remaining.toLocaleString('es-AR')} pts</p>
+        <p class="text-[10px] text-gray-400">de ${total.toLocaleString('es-AR')} totales</p>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _renderPointsMovements(recs) {
+  const section = document.getElementById('wallet-movements-section');
+  const listEl  = document.getElementById('wallet-movements-list');
+  if (!section || !listEl) return;
+
+  const recent = recs.slice(0, 20);
+
+  if (!recent.length) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  section.classList.remove('hidden');
+
+  listEl.innerHTML = recent.map(r => {
+    const fromName = r.from_user?.name || '—';
+    const toName   = r.to_user?.name   || '—';
+    const pts      = r.points || 0;
+    const prog     = r.program || '';
+    const date     = r.created_at
+      ? new Date(r.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+      : '';
+    const fromInitials = fromName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+    const color        = _avatarColorFor(fromName);
+
+    return `
+    <div class="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition">
+      <div class="w-8 h-8 rounded-full ${color} flex items-center justify-center text-white text-xs font-bold shrink-0">${fromInitials}</div>
+      <div class="flex-1 min-w-0">
+        <p class="text-xs text-gray-800">
+          ${r.from_user?.id
+            ? `<button onclick="openPeekById('${r.from_user.id}')" class="font-semibold hover:text-violet-600 transition">${fromName}</button>`
+            : `<span class="font-semibold">${fromName}</span>`}
+          <span class="text-gray-400 mx-1">→</span>
+          ${r.to_user?.id
+            ? `<button onclick="openPeekById('${r.to_user.id}')" class="font-semibold hover:text-violet-600 transition">${toName}</button>`
+            : `<span class="font-semibold">${toName}</span>`}
+        </p>
+        <p class="text-[10px] text-gray-400 mt-0.5 truncate">${prog}</p>
+      </div>
+      <div class="text-right shrink-0">
+        <p class="text-xs font-bold text-violet-700">-${pts.toLocaleString('es-AR')} pts</p>
+        <p class="text-[10px] text-gray-400">${date}</p>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function _avatarColorFor(name) {
@@ -2420,7 +2522,14 @@ async function submitBuyPoints() {
         'apikey': SUPABASE_ANON_KEY,
         'Authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({ points: pts }),
+      body: JSON.stringify({
+        points: pts,
+        // Cuando el superadmin impersona un admin, pasamos el ID real del admin
+        // para que el mail llegue con los datos correctos de la empresa
+        ...(isImpersonating && currentUser?.__backendId
+          ? { impersonated_user_id: currentUser.__backendId }
+          : {}),
+      }),
     });
   } catch (_) { /* silently ignore */ }
 
@@ -2462,7 +2571,10 @@ function _renderPointsRequestBanner(req) {
     banner.innerHTML = `
       <div class="bg-green-50 border border-green-100 rounded-2xl px-5 py-4 flex items-center gap-3">
         <i data-lucide="check-circle" class="w-5 h-5 text-green-500 shrink-0"></i>
-        <p class="text-sm text-green-700">Tu solicitud de <strong>${req.points.toLocaleString('es-AR')} pts</strong> fue aprobada. Los puntos se acreditarán a la brevedad.</p>
+        <p class="text-sm text-green-700 flex-1">Tu solicitud de <strong>${req.points.toLocaleString('es-AR')} pts</strong> fue aprobada. Los puntos se acreditarán a la brevedad.</p>
+        <button onclick="this.closest('#points-request-banner').classList.add('hidden')" class="p-1 rounded-full hover:bg-green-100 transition shrink-0">
+          <i data-lucide="x" class="w-4 h-4 text-green-400"></i>
+        </button>
       </div>`;
   }
   lucide.createIcons();

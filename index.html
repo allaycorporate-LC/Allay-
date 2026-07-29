@@ -53,7 +53,7 @@
     }
   </script>
 
-  <script src="_sdk/data_sdk.js?v=42" type="text/javascript"></script>
+  <script src="_sdk/data_sdk.js?v=47" type="text/javascript"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
@@ -1044,75 +1044,15 @@
           <div><p class="text-sm font-semibold text-gray-800" id="sum-name">—</p><p class="text-xs text-violet-600" id="sum-program">—</p></div>
         </div>
         <div>
-          <!-- Message label + assistant trigger -->
-          <div class="flex items-center justify-between mb-1.5">
+          <!-- Message label -->
+          <div class="mb-1.5">
             <label class="text-sm font-medium text-gray-700">Tu mensaje <span class="text-red-500">*</span></label>
-            <button type="button" onclick="openMessageAssistant()" id="btn-assistant"
-              class="flex items-center gap-1.5 text-xs font-semibold text-[#3d2b56] bg-[#ede9f7] hover:bg-violet-200 px-2.5 py-1 rounded-lg transition">
-              <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Asistente IA
-            </button>
           </div>
           <textarea id="recog-message" rows="4" placeholder="Contá por qué reconocés a esta persona..."
             autocomplete="off"
             class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"></textarea>
         </div>
 
-        <!-- ── AI Assistant Panel ── -->
-        <div id="assistant-panel" class="hidden bg-[#f5f0fa] border border-[#c9a7d4] rounded-2xl overflow-hidden">
-          <!-- Header -->
-          <div class="bg-[#3d2b56] px-4 py-3 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <i data-lucide="sparkles" class="w-4 h-4 text-[#c9a7d4]"></i>
-              <span class="text-sm font-bold text-white">Asistente de reconocimiento</span>
-            </div>
-            <button type="button" onclick="closeMessageAssistant()" class="text-white/60 hover:text-white transition">
-              <i data-lucide="x" class="w-4 h-4"></i>
-            </button>
-          </div>
-          <div class="p-4 space-y-3">
-            <p class="text-xs text-[#3d2b56]/70 leading-relaxed">Respondé estas 3 preguntas. Escribile directamente a la persona: usá "tomaste", "hiciste", no "tomó", "hizo".</p>
-
-            <!-- Q1: Valor / Programa -->
-            <div>
-              <label class="block text-xs font-semibold text-[#3d2b56] mb-1.5">
-                <span class="text-[#c9a7d4] mr-1">1.</span>
-                ¿Qué valor describe más a <span id="assistant-recipient-name" class="font-bold">esta persona</span>?
-              </label>
-              <select id="assistant-value" class="w-full text-sm bg-white border border-[#c9a7d4]/50 rounded-lg px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300">
-                <option value="">Elegí un valor...</option>
-              </select>
-            </div>
-
-            <!-- Q2: Ejemplo -->
-            <div>
-              <label class="block text-xs font-semibold text-[#3d2b56] mb-1.5">
-                <span class="text-[#c9a7d4] mr-1">2.</span>
-                Compartí un ejemplo de lo que hizo mostrando ese valor
-              </label>
-              <textarea id="assistant-example" rows="2"
-                placeholder="Ej: cubriste las ausencias del equipo sin que nadie te lo pidiera..."
-                class="w-full text-sm bg-white border border-[#c9a7d4]/50 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"></textarea>
-            </div>
-
-            <!-- Q3: Por qué llamó la atención -->
-            <div>
-              <label class="block text-xs font-semibold text-[#3d2b56] mb-1.5">
-                <span class="text-[#c9a7d4] mr-1">3.</span>
-                ¿Por qué ese momento te llamó la atención?
-              </label>
-              <textarea id="assistant-why" rows="2"
-                placeholder="Ej: fuiste vos quien lo vio venir y lo resolviste sin esperar que alguien te lo dijera..."
-                class="w-full text-sm bg-white border border-[#c9a7d4]/50 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"></textarea>
-            </div>
-
-            <!-- Generate button -->
-            <button type="button" onclick="generateMessageWithAssistant()"
-              class="w-full py-2.5 bg-[#3d2b56] text-white text-sm font-semibold rounded-xl hover:bg-violet-900 transition flex items-center justify-center gap-2">
-              <i data-lucide="wand-2" class="w-4 h-4"></i>
-              Crear reconocimiento
-            </button>
-          </div>
-        </div>
         <!-- Program budget banner (shown when selected program has budget) -->
         <div id="program-budget-info" class="hidden rounded-xl bg-celeste-50 border border-celeste-200 px-4 py-3">
           <div class="flex items-center justify-between mb-2">
@@ -1942,6 +1882,111 @@
 </div>
 
 <!-- ══════════════════════════════════════
+     OTHER USER PROFILE PAGE
+══════════════════════════════════════ -->
+<div id="other-profile-page" class="hidden fixed inset-0 z-[49] bg-gray-50 overflow-y-auto flex flex-col">
+
+  <!-- Header -->
+  <div class="bg-white border-b border-gray-100 shadow-sm sticky top-0 z-10">
+    <div class="flex items-center gap-3 px-6 py-4">
+      <button onclick="closeOtherProfile()" class="p-2 rounded-lg hover:bg-gray-100 transition">
+        <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+      </button>
+      <h1 id="opp-header-name" class="text-xl font-bold text-gray-800">Perfil</h1>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="flex-1 px-6 py-6 max-w-3xl mx-auto w-full space-y-5">
+
+    <!-- Avatar + nombre + reconocer -->
+    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-5">
+      <div id="opp-avatar" class="w-16 h-16 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-2xl font-bold shrink-0">?</div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-3 flex-wrap">
+          <p id="opp-name" class="text-xl font-extrabold text-gray-900">—</p>
+          <div class="flex gap-1 bg-gray-100 rounded-xl p-1 shrink-0">
+            <button id="opp-tab-activity" onclick="setOppTab('activity')"
+              class="px-3 py-1 rounded-lg text-xs font-semibold transition bg-white text-[#3d2b56] shadow-sm">
+              Actividad
+            </button>
+            <button id="opp-tab-about" onclick="setOppTab('about')"
+              class="px-3 py-1 rounded-lg text-xs font-semibold transition text-gray-500">
+              Sobre mí
+            </button>
+          </div>
+        </div>
+        <p id="opp-role" class="text-sm text-violet-500 font-semibold mt-0.5">—</p>
+        <p id="opp-meta" class="text-sm text-gray-400 mt-0.5">—</p>
+      </div>
+      <button id="opp-recognize-btn" onclick="openRecognitionFromPeek('')"
+        class="btn-recognize text-white px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-1.5 shrink-0">
+        <i data-lucide="heart" class="w-4 h-4"></i> Reconocer
+      </button>
+    </div>
+
+    <!-- Stats -->
+    <div class="grid grid-cols-2 gap-3">
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 text-center">
+        <p id="opp-given" class="text-2xl font-extrabold text-[#3d2b56]">—</p>
+        <p class="text-xs text-gray-400 mt-1">Reconocimientos dados</p>
+      </div>
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 text-center">
+        <p id="opp-received" class="text-2xl font-extrabold text-[#f19ac4]">—</p>
+        <p class="text-xs text-gray-400 mt-1">Reconocimientos recibidos</p>
+      </div>
+    </div>
+
+    <!-- ── Sobre mí ── -->
+    <div id="opp-about-section" class="hidden space-y-4">
+      <div id="opp-about-bio" class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hidden">
+        <h3 class="text-sm font-bold text-gray-700 mb-2">Sobre mí</h3>
+        <p id="opp-bio-text" class="text-sm text-gray-600 leading-relaxed"></p>
+      </div>
+      <div id="opp-about-interests" class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hidden">
+        <h3 class="text-sm font-bold text-gray-700 mb-2">Intereses y hobbies</h3>
+        <div id="opp-interests-tags" class="flex flex-wrap gap-1.5"></div>
+      </div>
+      <div id="opp-about-workstyle" class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hidden">
+        <h3 class="text-sm font-bold text-gray-700 mb-2">Forma de trabajo</h3>
+        <div id="opp-workstyle-tags" class="flex flex-wrap gap-1.5"></div>
+      </div>
+      <p id="opp-about-empty" class="text-sm text-gray-400 text-center py-6 hidden">Esta persona no ha completado su perfil aún.</p>
+    </div>
+
+    <!-- ── Actividad ── -->
+    <div id="opp-activity-section" class="flex gap-4 items-start">
+      <!-- Feed -->
+      <div class="flex-1 min-w-0 bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-sm font-bold text-gray-700 flex items-center gap-2">
+            <i data-lucide="layout-list" class="w-4 h-4 text-[#3d2b56]"></i> Reconocimientos
+          </h2>
+          <div class="flex gap-1 bg-gray-100 rounded-xl p-1">
+            <button id="opp-filter-all"      onclick="setOppFilter('all')"      class="opp-filter-btn px-3 py-1 rounded-lg text-xs font-semibold transition bg-white text-[#3d2b56] shadow-sm">Todos</button>
+            <button id="opp-filter-received" onclick="setOppFilter('received')" class="opp-filter-btn px-3 py-1 rounded-lg text-xs font-semibold transition text-gray-500">Recibidos</button>
+            <button id="opp-filter-given"    onclick="setOppFilter('given')"    class="opp-filter-btn px-3 py-1 rounded-lg text-xs font-semibold transition text-gray-500">Dados</button>
+          </div>
+        </div>
+        <div id="opp-feed" class="space-y-3">
+          <div class="flex justify-center py-8"><i data-lucide="loader" class="w-6 h-6 animate-spin text-violet-300"></i></div>
+        </div>
+      </div>
+      <!-- Conexiones -->
+      <div class="w-44 shrink-0 bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+        <h2 class="text-xs font-bold text-gray-600 flex items-center gap-1.5 mb-3">
+          <i data-lucide="network" class="w-3.5 h-3.5 text-[#3d2b56]"></i> Conexiones
+        </h2>
+        <div id="opp-connections">
+          <p class="text-[10px] text-gray-400 text-center py-2">Cargando...</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
      PROFILE PAGE
 ══════════════════════════════════════ -->
 <div id="profile-page" class="hidden fixed inset-0 z-40 bg-gray-50 overflow-y-auto flex flex-col h-full w-full">
@@ -2669,7 +2714,7 @@
         <div class="text-5xl text-center mb-4">👋</div>
         <h2 class="text-2xl font-extrabold text-gray-900 text-center mb-2">¡Bienvenido/a a Allay!</h2>
         <p id="ob-welcome-name" class="text-sm text-violet-500 font-semibold text-center mb-4"></p>
-        <p class="text-sm text-gray-500 text-center leading-relaxed">El lugar donde tu empresa celebra el trabajo bien hecho. En segundos vas a poder reconocer a alguien del equipo y construir una cultura más humana.</p>
+        <p class="text-sm text-gray-500 text-center leading-relaxed">Acá celebramos nuestros logros, porque creemos que lo bueno se potencia cuando se comparte. En segundos vas a poder reconocer a tus compañeros y construir una cultura más humana.</p>
       </div>
 
       <!-- Step 2: Cómo funciona -->
@@ -2680,21 +2725,21 @@
             <div class="w-9 h-9 rounded-xl bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0 text-sm">1</div>
             <div>
               <p class="text-sm font-semibold text-gray-800">Elegís a quién reconocer</p>
-              <p class="text-xs text-gray-500 mt-0.5">Cualquier persona de tu empresa, uno o varios a la vez.</p>
+              <p class="text-xs text-gray-500 mt-0.5">Cualquier persona de tu empresa, podes reconocer individualmente o a varios a la vez.</p>
             </div>
           </div>
           <div class="flex items-start gap-3 p-3.5 rounded-xl bg-[#f5f0fa] border border-[#c9a7d4]/30">
             <div class="w-9 h-9 rounded-xl bg-[#c9a7d4] flex items-center justify-center text-white font-bold shrink-0 text-sm">2</div>
             <div>
-              <p class="text-sm font-semibold text-gray-800">Elegís un valor</p>
-              <p class="text-xs text-gray-500 mt-0.5">Trabajo en equipo, innovación, liderazgo… lo que esa persona demostró.</p>
+              <p class="text-sm font-semibold text-gray-800">Elegís un programa</p>
+              <p class="text-xs text-gray-500 mt-0.5">Los programas representan valores o momentos que te sirven para destacar a esa persona.</p>
             </div>
           </div>
           <div class="flex items-start gap-3 p-3.5 rounded-xl bg-[#fff0f6] border border-[#f19ac4]/30">
             <div class="w-9 h-9 rounded-xl bg-[#f19ac4] flex items-center justify-center text-white font-bold shrink-0 text-sm">3</div>
             <div>
-              <p class="text-sm font-semibold text-gray-800">Escribís un mensaje sincero</p>
-              <p class="text-xs text-gray-500 mt-0.5">El equipo lo ve en el feed y puede reaccionar y comentar.</p>
+              <p class="text-sm font-semibold text-gray-800">Escribís un mensaje sincero que demuestre por qué ese compañero merece ser reconocido.</p>
+              <p class="text-xs text-gray-500 mt-0.5">Podes elegir si queres que sea privado o que lo pueda ver toda la empresa.</p>
             </div>
           </div>
         </div>
@@ -2703,7 +2748,7 @@
       <!-- Step 3: CTA -->
       <div id="ob-step-3" class="hidden">
         <div class="text-5xl text-center mb-4">🏆</div>
-        <h2 class="text-xl font-extrabold text-gray-900 text-center mb-2">¿Alguien se merece un reconocimiento hoy?</h2>
+        <h2 class="text-xl font-extrabold text-gray-900 text-center mb-2">¿Quién se merece un reconocimiento hoy?</h2>
         <p class="text-sm text-gray-500 text-center leading-relaxed mb-6">El primer reconocimiento es el más especial. Hay alguien en tu equipo que probablemente lo está esperando sin saberlo.</p>
         <button onclick="completeOnboarding(true)"
           class="w-full py-3 bg-[#3d2b56] text-white text-sm font-bold rounded-xl hover:bg-violet-900 transition flex items-center justify-center gap-2 mb-3">
@@ -2997,14 +3042,33 @@
       </div>
     </div>
 
+    <!-- Programs distribution -->
+    <div id="wallet-programs-section" class="hidden bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-6">
+      <div class="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
+        <h3 class="font-bold text-gray-800 text-sm">Puntos en programas</h3>
+        <span class="text-xs text-gray-400">Presupuesto asignado por programa</span>
+      </div>
+      <div id="wallet-programs-list" class="divide-y divide-gray-50"></div>
+    </div>
+
     <!-- Distribution table -->
-    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-6">
       <div class="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
         <h3 class="font-bold text-gray-800 text-sm">Distribución por empleado</h3>
         <span class="text-xs text-gray-400">Puntos disponibles para dar</span>
       </div>
       <div id="wallet-employee-list" class="divide-y divide-gray-50"></div>
     </div>
+
+    <!-- Movements -->
+    <div id="wallet-movements-section" class="hidden bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div class="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
+        <h3 class="font-bold text-gray-800 text-sm">Movimientos recientes</h3>
+        <span class="text-xs text-gray-400">Últimos reconocimientos enviados</span>
+      </div>
+      <div id="wallet-movements-list" class="divide-y divide-gray-50"></div>
+    </div>
+
   </div>
 </div>
 
@@ -3069,7 +3133,7 @@
   </div>
 </div>
 
-<script src="js/app.js?v=130"></script>
-<script src="js/analytics.js?v=3"></script>
+<script src="js/app.js?v=144"></script>
+<script src="js/analytics.js?v=8"></script>
 </body>
 </html>

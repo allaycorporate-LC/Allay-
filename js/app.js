@@ -58,7 +58,7 @@ function _applySidebarState() {
 function _closeAllOverlays() {
   const ids = ['profile-page','admin-page','analytics-page','store-page',
                 'notifications-page','programs-page','approvals-page','points-page',
-                'user-profile-page'];
+                'user-profile-page','other-profile-page'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.classList.add('hidden'); el.style.display = 'none'; }
@@ -282,9 +282,7 @@ async function handleLogin(e) {
       _rebuildCompanyMemberIds();
       renderFeed(true);
       loadNotifications();
-      loadCompanyPrograms();
-      _syncApprovedPrograms();
-      _loadApprovals();
+      loadCompanyPrograms().then(() => _loadApprovals());
       loadHomeSidebar();
       _setupFeedRealtime();
       renderWeeklyRecap();
@@ -412,6 +410,7 @@ async function saveNewPassword() {
     updateProfileDisplay();
     updatePointsDisplay();
     showSuccessToast('¡Contraseña establecida correctamente! Bienvenido.');
+    setTimeout(() => _checkOnboarding(), 700);
   } catch (error) {
     _log('Error saving password:', error);
     errorText.textContent = 'Error al procesar la solicitud';
@@ -1625,12 +1624,219 @@ function onGlobalSearch(q) {
 function _searchGoUser(userId) {
   _closeGlobalSearch();
   if (userId === currentUser?.__backendId) { openUserProfilePage(); return; }
-  const u = allUsers.find(x => x.__backendId === userId);
-  if (!u) return;
-  openPeekProfile(u);
+  openOtherProfile(userId);
 }
 
-function openPeekProfile(u) {
+function openPeekById(userId) {
+  if (!userId) return;
+  if (userId === currentUser?.__backendId) { openUserProfilePage(); return; }
+  openOtherProfile(userId);
+}
+
+// ─── Estado de la página de perfil ajeno ──────────────────────────────────────
+let _oppUserId  = null;
+let _oppRecs    = [];
+let _oppFilter  = 'all';
+
+function setOppTab(tab) {
+  const isActivity = tab === 'activity';
+  document.getElementById('opp-activity-section')?.classList.toggle('hidden', !isActivity);
+  document.getElementById('opp-about-section')?.classList.toggle('hidden',    isActivity);
+  ['activity','about'].forEach(t => {
+    const btn = document.getElementById(`opp-tab-${t}`);
+    if (!btn) return;
+    btn.className = t === tab
+      ? 'px-3 py-1 rounded-lg text-xs font-semibold transition bg-white text-[#3d2b56] shadow-sm'
+      : 'px-3 py-1 rounded-lg text-xs font-semibold transition text-gray-500';
+  });
+}
+
+function setOppFilter(filter) {
+  _oppFilter = filter;
+  ['all','received','given'].forEach(f => {
+    const btn = document.getElementById(`opp-filter-${f}`);
+    if (!btn) return;
+    btn.className = f === filter
+      ? 'opp-filter-btn px-3 py-1 rounded-lg text-xs font-semibold transition bg-white text-[#3d2b56] shadow-sm'
+      : 'opp-filter-btn px-3 py-1 rounded-lg text-xs font-semibold transition text-gray-500';
+  });
+  _renderOppFeed();
+}
+
+function _renderOppFeed() {
+  const userId = _oppUserId;
+  const feed   = document.getElementById('opp-feed');
+  if (!feed) return;
+
+  let recs = _oppRecs;
+  if (_oppFilter === 'given')    recs = recs.filter(r => r._type === 'sent');
+  if (_oppFilter === 'received') recs = recs.filter(r => r._type === 'received');
+
+  if (!recs.length) {
+    feed.innerHTML = '<p class="text-xs text-gray-400 py-4 text-center">No hay reconocimientos para mostrar.</p>';
+    return;
+  }
+
+  feed.innerHTML = recs.map(r => {
+    const isSent  = r._type === 'sent';
+    const other   = isSent ? (r.to_user?.name || 'Desconocido') : (r.from_user?.name || 'Desconocido');
+    const otherId = isSent ? r.to_user?.id : r.from_user?.id;
+    const initial = (other[0] || '?').toUpperCase();
+    const time    = formatTimeAgo(r.created_at);
+    const points  = Number(r.points) || 0;
+    const label   = isSent
+      ? `Reconoció a <button onclick="openPeekById('${otherId||''}')" class="font-semibold text-gray-800 hover:text-violet-600 transition">${esc(other)}</button>`
+      : `<button onclick="openPeekById('${otherId||''}')" class="font-semibold text-gray-800 hover:text-violet-600 transition">${esc(other)}</button> lo reconoció`;
+    const badge   = isSent
+      ? `<span class="text-[10px] font-bold uppercase tracking-wide text-[#3d2b56] bg-violet-50 px-2 py-0.5 rounded-full">Dado</span>`
+      : `<span class="text-[10px] font-bold uppercase tracking-wide text-[#e87cb4] bg-pink-50 px-2 py-0.5 rounded-full">Recibido</span>`;
+    const ptsBadge = points > 0
+      ? isSent
+        ? `<span class="text-xs font-semibold text-[#3d2b56]">-${points} pts</span>`
+        : `<span class="text-xs font-semibold text-[#e87cb4]">+${points} pts</span>`
+      : '';
+    return `<div class="flex items-start gap-3 py-3 border-b border-gray-50 last:border-0">
+      <div class="w-9 h-9 rounded-full ${getAvatarColor(other)} flex items-center justify-center text-white text-sm font-bold shrink-0">${initial}</div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <p class="text-sm text-gray-600">${label}</p>
+          ${badge}
+        </div>
+        <div class="flex items-center gap-2 mt-0.5">
+          <p class="text-xs text-[#3d2b56] font-medium">${esc(r.program || '')}</p>
+          ${ptsBadge}
+        </div>
+        <p class="text-xs text-gray-400 mt-1">${time}</p>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _renderOppConnections(recs) {
+  const el = document.getElementById('opp-connections');
+  if (!el) return;
+  const map = {};
+  recs.forEach(r => {
+    const isSent = r._type === 'sent';
+    const name   = isSent ? (r.to_user?.name || '') : (r.from_user?.name || '');
+    const id     = isSent ? (r.to_user?.id || '') : (r.from_user?.id || '');
+    if (!name) return;
+    if (!map[id]) map[id] = { name, id, count: 0 };
+    map[id].count++;
+  });
+  const sorted = Object.values(map).sort((a, b) => b.count - a.count).slice(0, 6);
+  if (!sorted.length) { el.innerHTML = '<p class="text-[10px] text-gray-400 text-center py-2">Sin conexiones aún</p>'; return; }
+  el.innerHTML = sorted.map(c => {
+    const initials = c.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+    const color    = getAvatarColor(c.name);
+    return `<button onclick="openPeekById('${c.id}')" class="flex items-center gap-2 w-full py-1.5 hover:bg-gray-50 rounded-lg transition text-left">
+      <div class="w-6 h-6 rounded-full ${color} flex items-center justify-center text-white text-[9px] font-bold shrink-0">${initials}</div>
+      <span class="text-[10px] text-gray-700 truncate font-medium">${esc(c.name)}</span>
+      <span class="text-[9px] text-gray-400 ml-auto shrink-0">${c.count}</span>
+    </button>`;
+  }).join('');
+}
+
+async function openOtherProfile(userId) {
+  if (!userId) return;
+  _closeAllOverlays();
+  _oppUserId = userId;
+  _oppRecs   = [];
+  _oppFilter = 'all';
+
+  const page = document.getElementById('other-profile-page');
+  page.classList.remove('hidden');
+  page.style.display = '';
+  _positionOverlayPage('other-profile-page');
+
+  // Datos básicos del usuario desde allUsers
+  const u = allUsers.find(x => x.__backendId === userId) || {};
+  const initials    = (u.name || '?').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+  const color       = getAvatarColor(u.name || '');
+  const roleLabels  = { superadmin: 'Superadmin', admin: 'Administrador', employee: 'Empleado' };
+
+  const el = id => document.getElementById(id);
+  el('opp-header-name').textContent = u.name || 'Perfil';
+  el('opp-name').textContent        = u.name || '—';
+  el('opp-role').textContent        = u.department || '';
+  el('opp-role').classList.toggle('hidden', !u.department);
+  el('opp-meta').textContent        = u.company || '—';
+  const av = el('opp-avatar');
+  av.textContent = initials;
+  av.className   = `w-16 h-16 rounded-full ${color} flex items-center justify-center text-white text-2xl font-bold shrink-0`;
+  const recBtn = el('opp-recognize-btn');
+  if (recBtn) recBtn.setAttribute('onclick', `openRecognitionFromPeek('${userId}')`);
+
+  // Reset feed
+  el('opp-feed').innerHTML = '<div class="flex justify-center py-8"><i data-lucide="loader" class="w-6 h-6 animate-spin text-violet-300"></i></div>';
+  el('opp-given').textContent    = '—';
+  el('opp-received').textContent = '—';
+  el('opp-connections').innerHTML = '<p class="text-[10px] text-gray-400 text-center py-2">Cargando...</p>';
+  setOppTab('activity');
+  lucide.createIcons();
+
+  // Sección "Sobre mí" con datos de allUsers (bio, interests, work_style)
+  _renderOppAbout(u);
+
+  // Fetch reconocimientos del servidor
+  const { data: recs } = await window.recognitionSdk.recentForUser(userId, 50);
+  _oppRecs = recs || [];
+
+  el('opp-given').textContent    = _oppRecs.filter(r => r._type === 'sent').length;
+  el('opp-received').textContent = _oppRecs.filter(r => r._type === 'received').length;
+
+  setOppFilter('all');
+  _renderOppConnections(_oppRecs);
+  lucide.createIcons();
+
+  // Si el perfil completo tiene más info que allUsers, lo recargamos desde DB
+  const { data: fullProfile } = await _sb.from('profiles')
+    .select('bio, interests, work_style, department')
+    .eq('id', userId)
+    .maybeSingle();
+  if (fullProfile) _renderOppAbout({ ...u, ...fullProfile });
+}
+
+function _renderOppAbout(u) {
+  const el = id => document.getElementById(id);
+
+  const hasBio        = !!u.bio;
+  const hasInterests  = !!u.interests;
+  const hasWorkStyle  = !!u.work_style;
+  const hasAnything   = hasBio || hasInterests || hasWorkStyle;
+
+  el('opp-about-bio')?.classList.toggle('hidden', !hasBio);
+  if (hasBio) el('opp-bio-text').textContent = u.bio;
+
+  el('opp-about-interests')?.classList.toggle('hidden', !hasInterests);
+  if (hasInterests) {
+    const tags = u.interests.split(/[,·]/).map(t => t.trim()).filter(Boolean);
+    el('opp-interests-tags').innerHTML = tags.map(t =>
+      `<span class="text-xs font-medium text-[#3d2b56] bg-violet-50 px-2.5 py-1 rounded-full">${esc(t)}</span>`
+    ).join('');
+  }
+
+  el('opp-about-workstyle')?.classList.toggle('hidden', !hasWorkStyle);
+  if (hasWorkStyle) {
+    const tags = u.work_style.split(/[,·]/).map(t => t.trim()).filter(Boolean);
+    el('opp-workstyle-tags').innerHTML = tags.map(t =>
+      `<span class="text-xs font-medium text-gray-600 bg-gray-100 px-2.5 py-1 rounded-full">${esc(t)}</span>`
+    ).join('');
+  }
+
+  el('opp-about-empty')?.classList.toggle('hidden', hasAnything);
+}
+
+function closeOtherProfile() {
+  const page = document.getElementById('other-profile-page');
+  page?.classList.add('hidden');
+  if (page) page.style.display = 'none';
+  _oppUserId = null;
+  _oppRecs   = [];
+  currentPage = 'home';
+}
+
+async function openPeekProfile(u) {
   let modal = document.getElementById('peek-profile-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -1638,31 +1844,83 @@ function openPeekProfile(u) {
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4';
     modal.innerHTML = `
       <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closePeekProfile()"></div>
-      <div id="peek-profile-card" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col items-center gap-3 z-10"></div>`;
+      <div id="peek-profile-card" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md z-10 overflow-hidden"></div>`;
     document.body.appendChild(modal);
   }
+
   const initials   = (u.name||'?').split(' ').map(n=>n[0]).join('').toUpperCase().substring(0,2);
   const color      = getAvatarColor(u.name||'');
   const roleLabels = { superadmin:'Superadmin', admin:'Admin', employee:'Empleado' };
+  const roleLabel  = u.department || roleLabels[u.role] || u.role || '';
   const card       = document.getElementById('peek-profile-card');
+  const canRecognize = currentUser?.role !== 'employee' || true; // employees can also recognize
+
   card.innerHTML = `
-    <button onclick="closePeekProfile()" class="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
-      <i data-lucide="x" class="w-4 h-4"></i>
-    </button>
-    <div class="w-20 h-20 rounded-full ${color} flex items-center justify-center text-white text-3xl font-bold">${esc(initials)}</div>
-    <div class="text-center">
-      <p class="text-lg font-bold text-gray-800">${esc(u.name)}</p>
-      <p class="text-sm text-gray-400">${esc(u.department || roleLabels[u.role] || u.role || '')}</p>
-      ${u.email ? `<p class="text-xs text-gray-400 mt-0.5">${esc(u.email)}</p>` : ''}
+    <div class="p-6 flex flex-col items-center gap-3 text-center">
+      <button onclick="closePeekProfile()" class="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+      <div class="w-20 h-20 rounded-full ${color} flex items-center justify-center text-white text-3xl font-bold">${esc(initials)}</div>
+      <div class="text-center">
+        <p class="text-lg font-bold text-gray-800">${esc(u.name)}</p>
+        ${roleLabel ? `<p class="text-sm text-gray-400">${esc(roleLabel)}</p>` : ''}
+      </div>
+      ${u.bio ? `<p class="text-sm text-gray-500 leading-snug max-w-xs">${esc(u.bio)}</p>` : ''}
+      <div class="flex gap-6 text-center">
+        ${u.points_received != null ? `<div><p class="text-lg font-bold text-[#e87cb4]">${u.points_received ?? 0}</p><p class="text-[10px] text-gray-400">pts recibidos</p></div>` : ''}
+      </div>
+      <button onclick="openRecognitionFromPeek('${esc(u.__backendId)}')"
+        class="btn-recognize text-white px-5 py-2 rounded-full text-sm font-semibold flex items-center gap-1.5">
+        <i data-lucide="heart" class="w-4 h-4"></i> Reconocer
+      </button>
     </div>
-    ${u.points_received != null ? `<div class="flex gap-4 text-center mt-1">
-      <div><p class="text-lg font-bold text-violet-600">${u.points_received ?? 0}</p><p class="text-[10px] text-gray-400">pts recibidos</p></div>
-    </div>` : ''}
-    <button onclick="openRecognitionFromPeek('${esc(u.__backendId)}')"
-      class="mt-2 btn-recognize text-white px-5 py-2 rounded-full text-sm font-semibold flex items-center gap-1.5">
-      <i data-lucide="heart" class="w-4 h-4"></i> Reconocer
-    </button>`;
+    <div class="border-t border-gray-100">
+      <div class="px-5 py-3 flex items-center justify-between">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Actividad reciente</p>
+      </div>
+      <div id="peek-feed" class="px-5 pb-4 space-y-0 max-h-64 overflow-y-auto">
+        <div class="flex justify-center py-4"><i data-lucide="loader" class="w-5 h-5 animate-spin text-violet-300"></i></div>
+      </div>
+    </div>`;
+
   modal.classList.remove('hidden');
+  lucide.createIcons();
+
+  // Async load mini feed
+  const { data: recs } = await window.recognitionSdk.recentForUser(u.__backendId, 8);
+  const feedEl = document.getElementById('peek-feed');
+  if (!feedEl) return;
+
+  if (!recs || recs.length === 0) {
+    feedEl.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">Sin reconocimientos aún.</p>';
+    return;
+  }
+
+  feedEl.innerHTML = recs.map(r => {
+    const isSent  = r._type === 'sent';
+    const other   = isSent ? (r.to_user?.name || 'Desconocido') : (r.from_user?.name || 'Desconocido');
+    const otherId = isSent ? r.to_user?.id : r.from_user?.id;
+    const label   = isSent
+      ? `<span class="text-gray-500">Reconoció a </span><button onclick="openPeekById('${otherId||''}')" class="font-semibold text-gray-800 hover:text-violet-600 transition">${esc(other)}</button>`
+      : `<button onclick="openPeekById('${otherId||''}')" class="font-semibold text-gray-800 hover:text-violet-600 transition">${esc(other)}</button><span class="text-gray-500"> lo reconoció</span>`;
+    const badge   = isSent
+      ? `<span class="text-[9px] font-bold text-[#3d2b56] bg-violet-50 px-1.5 py-0.5 rounded-full">Dado</span>`
+      : `<span class="text-[9px] font-bold text-[#e87cb4] bg-pink-50 px-1.5 py-0.5 rounded-full">Recibido</span>`;
+    const pts     = Number(r.points) || 0;
+    const ptsEl   = pts > 0 ? `<span class="text-[10px] font-semibold ${isSent ? 'text-[#3d2b56]' : 'text-[#e87cb4]'}">${isSent ? '-' : '+'}${pts} pts</span>` : '';
+    return `
+    <div class="flex items-start gap-3 py-2.5 border-b border-gray-50 last:border-0">
+      <div class="w-7 h-7 rounded-full ${getAvatarColor(other)} flex items-center justify-center text-white text-[10px] font-bold shrink-0">${esc((other[0]||'?').toUpperCase())}</div>
+      <div class="flex-1 min-w-0">
+        <p class="text-xs leading-snug">${label} ${badge}</p>
+        <div class="flex items-center gap-2 mt-0.5">
+          <p class="text-[10px] text-violet-500 font-medium truncate">${esc(r.program||'')}</p>
+          ${ptsEl}
+        </div>
+      </div>
+      <p class="text-[10px] text-gray-400 shrink-0">${formatTimeAgo(r.created_at)}</p>
+    </div>`;
+  }).join('');
   lucide.createIcons();
 }
 
@@ -1672,10 +1930,10 @@ function closePeekProfile() {
 
 function openRecognitionFromPeek(userId) {
   closePeekProfile();
+  // No cerramos other-profile-page para que quede de fondo bajo el modal
   const u = allUsers.find(x => x.__backendId === userId);
   if (!u) return;
   openModal();
-  // Pre-select this person as recipient
   setTimeout(() => {
     _selectedRecipients = [{ id: u.__backendId, name: u.name }];
     _renderSelectedBar();
@@ -1854,13 +2112,6 @@ function renderRecognitionBattery() {
   const msg   = document.getElementById('battery-msg');
   if (label) label.textContent = `${filled} / ${MAX} esta semana`;
   if (msg)   msg.textContent   = MSGS[Math.min(filled, MSGS.length - 1)];
-}
-
-// ─────────────────────────────────────────
-// BUDGET KEY
-// ─────────────────────────────────────────
-function _getBudgetKey(programId) {
-  return `allay_budget_${currentUser?.company_id || 'default'}_${programId}`;
 }
 
 function updateProfileDisplay() {
@@ -4177,7 +4428,17 @@ function buildFeedCard(rec) {
       <div class="flex items-start gap-3 mb-3">
         <div class="w-10 h-10 rounded-full ${avatarColor} flex items-center justify-center text-white font-bold shrink-0">${initials}</div>
         <div class="flex-1 min-w-0">
-          <p class="text-sm"><span class="font-bold text-gray-800">${esc(senderName)}</span>${senderInactive ? ' <span class="text-[10px] font-semibold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full align-middle">inactivo</span>' : ''} <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">${esc(toInactive ? toName : recipientDisplay)}</span>${toInactive ? ' <span class="text-[10px] font-semibold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full align-middle">inactivo</span>' : ''}</p>
+          <p class="text-sm">${
+            senderInactive || !rec.from_user?.id
+              ? `<span class="font-bold text-gray-800">${esc(senderName)}</span>${senderInactive ? ' <span class="text-[10px] font-semibold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full align-middle">inactivo</span>' : ''}`
+              : `<button onclick="openPeekById('${rec.from_user.id}')" class="font-bold text-gray-800 hover:text-violet-600 transition">${esc(senderName)}</button>`
+          } <span class="text-gray-400">reconoció a</span> ${
+            toInactive || !rec.to_user?.id
+              ? `<span class="font-bold text-violet-600">${esc(toInactive ? toName : recipientDisplay)}</span>${toInactive ? ' <span class="text-[10px] font-semibold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full align-middle">inactivo</span>' : ''}`
+              : groupData
+                ? `<span class="font-bold text-violet-600">${esc(recipientDisplay)}</span>`
+                : `<button onclick="openPeekById('${rec.to_user.id}')" class="font-bold text-violet-600 hover:text-violet-800 transition">${esc(recipientDisplay)}</button>`
+          }</p>
           <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1 flex-wrap"><i data-lucide="clock" class="w-3 h-3 shrink-0"></i> ${formatTimeAgo(rec.created_at)} · <span class="text-violet-500 font-medium">${esc(rec.program)}</span>${programData?.tag ? `<span class="text-[10px] font-semibold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">#${esc(programData.tag)}</span>` : ''}</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
@@ -4768,7 +5029,13 @@ function buildSuperadminRewardCard(r, redemptionCount, cat) {
   const stockLabel = (stock === null || stock === undefined) ? 'Sin límite' : `${stock} unidades`;
 
   return `<div class="bg-white rounded-xl border border-gray-100 p-5 flex flex-col gap-3 hover:shadow-md transition relative">
-    <img src="${imgSrc}" alt="${name}" class="w-full h-28 object-cover rounded-lg bg-gray-50">
+    <div class="relative">
+      <img id="reward-img-${id}" src="${imgSrc}" alt="${name}" class="w-full h-28 object-cover rounded-lg bg-gray-50">
+      <label class="absolute bottom-1.5 right-1.5 bg-white/95 hover:bg-white text-violet-600 text-[10px] font-bold px-2 py-1 rounded-lg cursor-pointer shadow-sm transition">
+        📷 Cambiar foto
+        <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" onchange='uploadRewardImage(${JSON.stringify(id)}, this)'>
+      </label>
+    </div>
     <div>
       <h4 class="font-bold text-gray-800 text-sm leading-snug">${name}</h4>
       <p class="text-xs text-gray-400 mt-1.5 leading-relaxed">${desc}</p>
@@ -4792,6 +5059,41 @@ function buildSuperadminRewardCard(r, redemptionCount, cat) {
       </button>
     </div>
   </div>`;
+}
+
+async function uploadRewardImage(rewardId, inputEl) {
+  const file = inputEl.files?.[0];
+  if (!file) return;
+
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
+    showErrorToast('Formato no soportado. Usá jpg, png, gif o webp.');
+    return;
+  }
+
+  const path = `rewards/${rewardId}-${Date.now()}.${ext}`;
+  const { error: uploadError } = await _sb.storage
+    .from('image-library')
+    .upload(path, file, { cacheControl: '3600', upsert: false });
+
+  if (uploadError) {
+    console.error('[uploadRewardImage] upload error:', uploadError);
+    showErrorToast(`Error al subir la imagen: ${uploadError.message || uploadError}`);
+    return;
+  }
+
+  const { data } = _sb.storage.from('image-library').getPublicUrl(path);
+  const url = data.publicUrl;
+
+  const { isOk } = await window.rewardSdk.updateImage(rewardId, url);
+  if (!isOk) {
+    showErrorToast('Error al guardar la imagen del producto');
+    return;
+  }
+
+  const img = document.getElementById(`reward-img-${rewardId}`);
+  if (img) img.src = url;
+  showSuccessToast('Imagen actualizada');
 }
 
 async function updateRewardStock(rewardId) {
@@ -4850,11 +5152,58 @@ const DEFAULT_PROGRAMS = [
 ];
 
 let companyPrograms = [...DEFAULT_PROGRAMS];
+// Expuesto para que analytics.js pueda leer el array actualizado
+Object.defineProperty(window, 'companyPrograms', { get: () => companyPrograms });
+
+// Normaliza una fila de la tabla "programs" (snake_case) al shape que usa el front
+function _mapDbProgram(p) {
+  return {
+    ...p,
+    emoji:     p.emoji || '⭐',
+    employees: p.target_employee_ids || [],
+    image:     p.image_url || null,
+    createdBy: p.created_by || null,
+    custom:    true,
+  };
+}
 
 async function loadCompanyPrograms() {
   companyPrograms = [...DEFAULT_PROGRAMS];
-  _loadGlobalOverrides();
-  _loadCustomPrograms();
+
+  const isSuperadminView = currentUser?.role === 'superadmin' && !isImpersonating;
+
+  if (isSuperadminView) {
+    // Superadmin: cargar programas de TODAS las empresas
+    const [allRes, companiesRes] = await Promise.all([
+      window.programsSdk.listAll(),
+      _companiesData.length ? Promise.resolve({ isOk: true, data: _companiesData })
+                            : window.companySdk.list(),
+    ]);
+    if (allRes.isOk) companyPrograms.push(...allRes.data.map(_mapDbProgram));
+    if (companiesRes.isOk && companiesRes.data) _companiesData = companiesRes.data;
+
+  } else if (currentUser?.company_id) {
+    const { isOk, data } = await window.programsSdk.list(currentUser.company_id);
+    if (isOk) companyPrograms.push(...data.map(_mapDbProgram));
+
+    const { isOk: ovOk, data: overrides } = await window.programsSdk.listOverrides(currentUser.company_id);
+    if (ovOk && overrides.length) {
+      const byKey = {};
+      overrides.forEach(o => { byKey[o.program_key] = o; });
+      companyPrograms = companyPrograms.map(p => {
+        const o = p.global && byKey[p.id];
+        if (!o) return p;
+        return {
+          ...p,
+          emoji:       o.emoji       || p.emoji,
+          name:        o.name        || p.name,
+          tag:         o.tag         ?? p.tag,
+          description: o.description ?? p.description,
+        };
+      });
+    }
+  }
+
   renderProgramsInModal();
   renderHomeProgramsWidget();
   if (currentPage === 'admin') renderProgramsAdmin();
@@ -4920,12 +5269,12 @@ async function _resyncOrphanedPendingPrograms() {
   const orphans = companyPrograms.filter(p =>
     p.pending === true &&
     p.createdBy === currentUser.__backendId &&
-    !p._requestId  // not yet submitted successfully
+    !_approvalsQueue.some(r => r.pendingProgramId === p.id) &&
+    !_approvalsHistory.some(r => r.pendingProgramId === p.id)
   );
   if (!orphans.length) return;
 
   const colors = ['bg-[#3d2b56]', 'bg-[#f19ac4]', 'bg-[#c9a7d4]'];
-  let changed = false;
   for (const prog of orphans) {
     const req = {
       id:                crypto.randomUUID(),
@@ -4945,12 +5294,8 @@ async function _resyncOrphanedPendingPrograms() {
       status:            'pending',
     };
     const { isOk } = await window.approvalsSdk.add(req);
-    if (isOk) {
-      prog._requestId = req.id; // mark so we don't resubmit next login
-      changed = true;
-    }
+    if (isOk) _approvalsQueue.unshift(req); // avoid resubmitting in the same session
   }
-  if (changed) _saveCustomPrograms();
 }
 
 let _approvalsTab           = 'queue';
@@ -4985,26 +5330,34 @@ function _updateApprovalsNavBadge() {
   badge.classList.toggle('hidden', pending === 0);
 }
 
-function _submitProgramApprovalRequest(programData, budget, rechargeFor = null, fundingSource = 'request') {
+async function _submitProgramApprovalRequest(programData, budget, rechargeFor = null, fundingSource = 'request') {
   const name     = currentUser?.name || 'Empleado';
   const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
   const colors   = ['bg-[#3d2b56]', 'bg-[#f19ac4]', 'bg-[#c9a7d4]'];
   const color    = colors[name.length % colors.length];
 
-  // For new programs (not recharges), add to companyPrograms with pending flag so the employee can see it
+  // For new programs (not recharges), insert a pending row in the DB so the
+  // request is visible to every device, not just this browser.
   let pendingProgramId = null;
   if (!rechargeFor) {
-    const pendingEntry = {
-      ...programData,
-      pending:    true,
-      active:     false,
+    const { isOk, data } = await window.programsSdk.create({
+      company_id:          currentUser?.company_id,
+      name:                programData.name,
+      emoji:               programData.emoji,
+      description:         programData.description || null,
+      tag:                 programData.tag || null,
       budget,
-      company_id: currentUser?.company_id,
-      createdBy:  currentUser?.__backendId,
-    };
-    companyPrograms.push(pendingEntry);
-    pendingProgramId = pendingEntry.id;
-    _saveCustomPrograms();
+      budget_remaining:    budget,
+      target_employee_ids: programData.employees || [],
+      pending:             true,
+      active:              false,
+      custom:              true,
+      created_by:          currentUser?.__backendId || null,
+    });
+    if (isOk) {
+      companyPrograms.push(_mapDbProgram(data));
+      pendingProgramId = data.id;
+    }
   }
 
   const req = {
@@ -5027,12 +5380,7 @@ function _submitProgramApprovalRequest(programData, budget, rechargeFor = null, 
   };
 
   _approvalsQueue.unshift(req);
-  if (window.approvalsSdk) window.approvalsSdk.add(req).then(({ isOk }) => {
-    if (isOk && pendingProgramId) {
-      const p = companyPrograms.find(x => x.id === pendingProgramId);
-      if (p) { p._requestId = req.id; _saveCustomPrograms(); }
-    }
-  }).catch(_log);
+  if (window.approvalsSdk) window.approvalsSdk.add(req).catch(_log);
   _updateApprovalsNavBadge();
   if (currentPage === 'programs') renderProgramsPage();
   showSuccessToast(`Solicitud de "${programData.name}" enviada al administrador`);
@@ -5330,28 +5678,38 @@ function approveRequest(reqId) {
       // Recharge existing program budget
       const prog = companyPrograms.find(p => p.id === req.rechargeFor);
       if (prog) {
-        const oldRemaining = _getProgramRemainingBudget(prog);
-        prog.budget = (prog.budget || 0) + req.points;
-        try { localStorage.setItem(_getBudgetKey(prog.id), oldRemaining + req.points); } catch (_) {}
-        _saveCustomPrograms();
+        const oldRemaining  = _getProgramRemainingBudget(prog);
+        prog.budget          = (prog.budget || 0) + req.points;
+        prog.budget_remaining = oldRemaining + req.points;
+        window.programsSdk.update(prog.id, {
+          budget: prog.budget, budget_remaining: prog.budget_remaining,
+        }).catch(_log);
       }
     } else if (req.pendingProgramId) {
-      // Activate the pending program entry that was already added
+      // Activate the pending program row that was already inserted in DB
       const prog = companyPrograms.find(p => p.id === req.pendingProgramId);
       if (prog) {
         prog.pending = false;
         prog.active  = true;
         if (!prog.createdBy && req.requestedByUserId) prog.createdBy = req.requestedByUserId;
-        _saveCustomPrograms();
-      } else {
-        // Fallback: program was not found, push a fresh one
-        companyPrograms.push({ ...req.programData, active: true, pending: false, createdBy: req.requestedByUserId });
-        _saveCustomPrograms();
+        window.programsSdk.update(prog.id, {
+          pending: false, active: true, created_by: prog.createdBy || null,
+        }).catch(_log);
       }
     } else {
       // Legacy path (requests without pendingProgramId)
-      companyPrograms.push({ ...req.programData, active: true });
-      _saveCustomPrograms();
+      window.programsSdk.create({
+        company_id:  currentUser?.company_id,
+        name:        req.programData.name,
+        emoji:       req.programData.emoji,
+        description: req.programData.description || null,
+        tag:         req.programData.tag || null,
+        budget:      req.points,
+        budget_remaining: req.points,
+        custom:      true,
+        active:      true,
+        created_by:  req.requestedByUserId || null,
+      }).then(({ isOk, data }) => { if (isOk) companyPrograms.push(_mapDbProgram(data)); }).catch(_log);
     }
     renderHomeProgramsWidget();
     renderProgramsInModal();
@@ -5394,13 +5752,11 @@ function rejectRequest(reqId) {
   _approvalsQueue.splice(idx, 1);
   _approvalsHistory.unshift(req);
 
-  // Remove the pending program entry from companyPrograms
+  // Remove the pending program row (both locally and in the database)
   if (req.pendingProgramId) {
     const progIdx = companyPrograms.findIndex(p => p.id === req.pendingProgramId);
-    if (progIdx !== -1) {
-      companyPrograms.splice(progIdx, 1);
-      _saveCustomPrograms();
-    }
+    if (progIdx !== -1) companyPrograms.splice(progIdx, 1);
+    window.programsSdk.delete(req.pendingProgramId).catch(_log);
     if (currentPage === 'programs') renderProgramsPage();
   }
 
@@ -5428,31 +5784,112 @@ function rejectRequest(reqId) {
 }
 
 function _visiblePrograms() {
-  const userId  = currentUser?.__backendId;
-  const isAdmin = currentUser?.role === 'superadmin';
+  const userId       = currentUser?.__backendId;
+  const isSuperadmin = currentUser?.role === 'superadmin';
+  const isAdmin      = currentUser?.role === 'admin';
+  const myCompanyId  = currentUser?.company_id;
+
   return companyPrograms.filter(p => {
     if (p.pending) return false;
     if (p.active === false) return false;
+
     if (p.custom) {
-      if (isAdmin) return true;
+      // Nunca mostrar programas de otra empresa (sin excepciones)
+      if (!isSuperadmin && p.company_id && p.company_id !== myCompanyId) return false;
+
+      if (isSuperadmin) return true;
+      if (isAdmin) return true;  // admins ven todos los programas de su empresa
       if (p.createdBy === userId) return true;
       return Array.isArray(p.employees) && p.employees.includes(userId);
     }
+
+    // Programas globales (DEFAULT_PROGRAMS): siempre visibles para todos
     return true;
   });
+}
+
+function _buildActiveProgramCard(p) {
+  const isSA      = currentUser?.role === 'superadmin';
+  const remaining = _getProgramRemainingBudget(p);
+  const safeName  = p.name.replace(/'/g, "\\'");
+  const companyBadge = isSA && p.company_id
+    ? `<span class="text-[10px] font-semibold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">🏢 ${_companiesData.find(c => c.id === p.company_id)?.name || p.company_id}</span>`
+    : '';
+  const menu = p.custom ? `
+    <div class="absolute top-3 right-3" style="z-index:2;">
+      <button onclick="toggleProgramMenu('${p.id}',event)" class="p-1.5 rounded-lg hover:bg-gray-100 transition text-gray-500 hover:text-gray-700 font-bold text-base leading-none">···</button>
+      <div id="pmenu-${p.id}" class="hidden absolute right-0 top-8 bg-white border border-gray-100 rounded-xl shadow-lg py-1 min-w-[150px]">
+        <button onclick="openProgramHistory('${p.id}'); closeProgramMenus()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left"><i data-lucide="clock" class="w-3.5 h-3.5 shrink-0"></i> Historial</button>
+        <button onclick="openEditProgramModal('${p.id}'); closeProgramMenus()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left"><i data-lucide="pencil" class="w-3.5 h-3.5 shrink-0"></i> Editar</button>
+        ${isSA ? `<button onclick="openSaDeleteProgramModal('${p.id}','${safeName}',null,'${p.company_id||''}'); closeProgramMenus()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left"><i data-lucide="shield-off" class="w-3.5 h-3.5 shrink-0"></i> Eliminar</button>`
+          : `<div class="relative group/del"><button disabled class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-300 cursor-not-allowed text-left"><i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i> Eliminar</button><div class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-800 text-white text-xs rounded-lg px-3 py-2 opacity-0 group-hover/del:opacity-100 transition-opacity z-50 text-center leading-snug shadow-lg">Solo el superadmin puede eliminar programas.<div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div></div></div>`}
+      </div>
+    </div>` : p.global && isSA ? `
+    <div class="absolute top-3 right-3" style="z-index:2;">
+      <button onclick="toggleProgramMenu('${p.id}',event)" class="p-1.5 rounded-lg hover:bg-gray-100 transition text-gray-500 hover:text-gray-700 font-bold text-base leading-none">···</button>
+      <div id="pmenu-${p.id}" class="hidden absolute right-0 top-8 bg-white border border-gray-100 rounded-xl shadow-lg py-1 min-w-[150px]">
+        <button onclick="openEditProgramModal('${p.id}'); closeProgramMenus()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left"><i data-lucide="pencil" class="w-3.5 h-3.5 shrink-0"></i> Editar</button>
+        <button onclick="openSaDeleteProgramModal('${p.id}','${safeName}',null,null); closeProgramMenus()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left"><i data-lucide="shield-off" class="w-3.5 h-3.5 shrink-0"></i> Eliminar (SA)</button>
+      </div>
+    </div>` : '';
+  return `
+  <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col items-center gap-3 text-center hover:shadow-md transition relative">
+    ${menu}
+    <div class="w-14 h-14 rounded-2xl bg-violet-50 flex items-center justify-center text-3xl">${p.emoji || '⭐'}</div>
+    <h3 class="font-bold text-gray-800 text-sm">${p.name}</h3>
+    ${p.tag ? `<span class="text-[10px] text-gray-400 font-medium">#${p.tag}</span>` : ''}
+    ${p.description ? `<p class="text-[11px] text-gray-500 leading-snug">${p.description}</p>` : ''}
+    <div class="flex items-center gap-2 flex-wrap justify-center">
+      <span class="text-[10px] font-semibold text-violet-600 bg-violet-50 px-2.5 py-1 rounded-full">Activo</span>
+      ${p.budget ? `<span class="text-[10px] font-semibold text-celeste-700 bg-celeste-50 px-2.5 py-1 rounded-full">💰 ${remaining} / ${p.budget} pts</span>` : ''}
+      ${companyBadge}
+    </div>
+  </div>`;
+}
+
+function _buildPendingProgramCard(p) {
+  const isSA    = currentUser?.role === 'superadmin';
+  const reqId   = _approvalsQueue.find(r => r.pendingProgramId === p.id)?.id || null;
+  const safeName = p.name.replace(/'/g, "\\'");
+  const companyBadge = isSA && p.company_id
+    ? `<span class="text-[10px] font-semibold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">🏢 ${_companiesData.find(c => c.id === p.company_id)?.name || p.company_id}</span>`
+    : '';
+  return `
+  <div class="bg-gray-50 rounded-2xl border border-amber-200 shadow-sm p-6 flex flex-col items-center gap-3 text-center relative opacity-75">
+    <div class="absolute top-3 left-3">
+      <span class="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="inline w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Pendiente
+      </span>
+    </div>
+    ${isSA ? `<div class="absolute top-3 right-3" style="z-index:2;"><button onclick="openSaDeleteProgramModal('${p.id}','${safeName}','${reqId||''}','${p.company_id||''}')" class="p-1.5 rounded-lg hover:bg-red-50 transition text-red-400 hover:text-red-600"><i data-lucide="shield-off" class="w-4 h-4"></i></button></div>` : ''}
+    <div class="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center text-3xl mt-4">${p.emoji || '⭐'}</div>
+    <h3 class="font-bold text-gray-500 text-sm">${p.name}</h3>
+    ${p.tag ? `<span class="text-[10px] text-gray-400 font-medium">#${p.tag}</span>` : ''}
+    ${p.description ? `<p class="text-[11px] text-gray-400 leading-snug">${p.description}</p>` : ''}
+    <div class="flex items-center gap-2 flex-wrap justify-center">
+      ${p.budget ? `<span class="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">💰 ${p.budget} pts solicitados</span>` : ''}
+      ${companyBadge}
+    </div>
+  </div>`;
 }
 
 function renderProgramsPage() {
   const grid = document.getElementById('programs-page-grid');
   if (!grid) return;
 
-  const userId = currentUser?.__backendId;
-  const active  = _visiblePrograms();
+  const isSuperadmin = currentUser?.role === 'superadmin';
 
-  // Pending programs visible to the current user (the ones they created while awaiting approval)
+  if (isSuperadmin) {
+    _renderSuperadminProgramsPage(grid);
+    return;
+  }
+
+  const userId  = currentUser?.__backendId;
+  const active  = _visiblePrograms();
   const pending = companyPrograms.filter(p => {
     if (!p.pending) return false;
-    if (currentUser?.role === 'superadmin' || currentUser?.role === 'admin') return true;
+    if (currentUser?.role === 'admin') return true;
     return p.createdBy === userId || p.company_id === currentUser?.company_id;
   });
 
@@ -5461,99 +5898,78 @@ function renderProgramsPage() {
     return;
   }
 
-  const isSuperadmin = currentUser?.role === 'superadmin';
-  const activeCards = active.map(p => {
-    const remaining = _getProgramRemainingBudget(p);
-    return `
-    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col items-center gap-3 text-center hover:shadow-md transition relative">
-      ${p.custom ? `
-        <div class="absolute top-3 right-3" style="z-index:2;">
-          <button onclick="toggleProgramMenu('${p.id}',event)"
-            class="p-1.5 rounded-lg hover:bg-gray-100 transition text-gray-500 hover:text-gray-700 font-bold text-base leading-none">
-            ···
-          </button>
-          <div id="pmenu-${p.id}" class="hidden absolute right-0 top-8 bg-white border border-gray-100 rounded-xl shadow-lg py-1 min-w-[150px]">
-            <button onclick="openProgramHistory('${p.id}'); closeProgramMenus()"
-              class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left">
-              <i data-lucide="clock" class="w-3.5 h-3.5 shrink-0"></i> Historial
-            </button>
-            <button onclick="openEditProgramModal('${p.id}'); closeProgramMenus()"
-              class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left">
-              <i data-lucide="pencil" class="w-3.5 h-3.5 shrink-0"></i> Editar
-            </button>
-            ${isSuperadmin ? `
-            <button onclick="openSaDeleteProgramModal('${p.id}','${p.name.replace(/'/g,"\\'")}',null,'${p.company_id||''}'); closeProgramMenus()"
-              class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left">
-              <i data-lucide="shield-off" class="w-3.5 h-3.5 shrink-0"></i> Eliminar
-            </button>` : `
-            <div class="relative group/del">
-              <button disabled
-                class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-300 cursor-not-allowed text-left">
-                <i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i> Eliminar
-              </button>
-              <div class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-800 text-white text-xs rounded-lg px-3 py-2 opacity-0 group-hover/del:opacity-100 transition-opacity duration-150 z-50 text-center leading-snug shadow-lg">
-                Solo el superadmin puede eliminar programas. Solicitalo a tu superadministrador.
-                <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
-              </div>
-            </div>`}
-          </div>
-        </div>` : ''}
-      ${p.global && isSuperadmin ? `
-        <div class="absolute top-3 right-3" style="z-index:2;">
-          <button onclick="toggleProgramMenu('${p.id}',event)"
-            class="p-1.5 rounded-lg hover:bg-gray-100 transition text-gray-500 hover:text-gray-700 font-bold text-base leading-none">
-            ···
-          </button>
-          <div id="pmenu-${p.id}" class="hidden absolute right-0 top-8 bg-white border border-gray-100 rounded-xl shadow-lg py-1 min-w-[150px]">
-            <button onclick="openEditProgramModal('${p.id}'); closeProgramMenus()"
-              class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left">
-              <i data-lucide="pencil" class="w-3.5 h-3.5 shrink-0"></i> Editar
-            </button>
-            <button onclick="openSaDeleteProgramModal('${p.id}','${p.name.replace(/'/g,"\\'")}',null,null); closeProgramMenus()"
-              class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left">
-              <i data-lucide="shield-off" class="w-3.5 h-3.5 shrink-0"></i> Eliminar (SA)
-            </button>
-          </div>
-        </div>` : ''}
-      <div class="w-14 h-14 rounded-2xl bg-violet-50 flex items-center justify-center text-3xl">${p.emoji || '⭐'}</div>
-      <h3 class="font-bold text-gray-800 text-sm">${p.name}</h3>
-      ${p.tag ? `<span class="text-[10px] text-gray-400 font-medium">#${p.tag}</span>` : ''}
-      ${p.description ? `<p class="text-[11px] text-gray-500 leading-snug">${p.description}</p>` : ''}
-      <div class="flex items-center gap-2 flex-wrap justify-center">
-        <span class="text-[10px] font-semibold text-violet-600 bg-violet-50 px-2.5 py-1 rounded-full">Activo</span>
-        ${p.budget ? `<span class="text-[10px] font-semibold text-celeste-700 bg-celeste-50 px-2.5 py-1 rounded-full">💰" ${remaining} / ${p.budget} pts</span>` : ''}
-      </div>
-    </div>`;
+  grid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4';
+  grid.innerHTML = [
+    ...active.map(p => _buildActiveProgramCard(p)),
+    ...pending.map(p => _buildPendingProgramCard(p)),
+  ].join('');
+}
+
+function _renderSuperadminProgramsPage(grid) {
+  grid.className = '';
+
+  const globals   = companyPrograms.filter(p => p.global && p.active !== false);
+  const allCustom = companyPrograms.filter(p => p.custom && !p.global); // includes pending
+
+  // Group all custom programs (active + pending) by company — no duplicates
+  const byCompany = {};
+  allCustom.forEach(p => {
+    const cid = p.company_id || 'unknown';
+    if (!byCompany[cid]) byCompany[cid] = [];
+    byCompany[cid].push(p);
   });
 
-  const pendingCards = pending.map(p => {
-    const reqId = _approvalsQueue.find(r => r.pendingProgramId === p.id)?.id || null;
+  const companyGroups = Object.entries(byCompany).map(([cid, programs]) => {
+    const companyName = _companiesData.find(c => c.id === cid)?.name || cid;
+    const cards = programs.map(p =>
+      p.pending ? _buildPendingProgramCard(p) : _buildActiveProgramCard(p)
+    ).join('');
     return `
-    <div class="bg-gray-50 rounded-2xl border border-amber-200 shadow-sm p-6 flex flex-col items-center gap-3 text-center relative opacity-75">
-      <div class="absolute top-3 left-3">
-        <span class="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-          <svg xmlns="http://www.w3.org/2000/svg" class="inline w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          Pendiente de aprobación
-        </span>
+    <div class="mb-5">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-base">🏢</span>
+        <h4 class="font-bold text-gray-700 text-sm">${companyName}</h4>
+        <span class="text-xs text-gray-400">(${programs.length})</span>
       </div>
-      ${isSuperadmin ? `
-      <div class="absolute top-3 right-3" style="z-index:2;">
-        <button onclick="openSaDeleteProgramModal('${p.id}','${p.name.replace(/'/g,"\\'")}','${reqId||''}','${p.company_id||''}')"
-          class="p-1.5 rounded-lg hover:bg-red-50 transition text-red-400 hover:text-red-600" title="Eliminar programa">
-          <i data-lucide="shield-off" class="w-4 h-4"></i>
-        </button>
-      </div>` : ''}
-      <div class="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center text-3xl mt-4">${p.emoji || '⭐'}</div>
-      <h3 class="font-bold text-gray-500 text-sm">${p.name}</h3>
-      ${p.tag ? `<span class="text-[10px] text-gray-400 font-medium">#${p.tag}</span>` : ''}
-      ${p.description ? `<p class="text-[11px] text-gray-400 leading-snug">${p.description}</p>` : ''}
-      <div class="flex items-center gap-2 flex-wrap justify-center">
-        ${p.budget ? `<span class="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">💰 ${p.budget} pts solicitados</span>` : ''}
-      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">${cards}</div>
     </div>`;
-  });
+  }).join('');
 
-  grid.innerHTML = [...activeCards, ...pendingCards].join('');
+  const globalsHtml = globals.length
+    ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">${globals.map(p => _buildActiveProgramCard(p)).join('')}</div>`
+    : '<p class="text-sm text-gray-400 py-4">Sin programas globales.</p>';
+
+  const customsHtml = Object.keys(byCompany).length
+    ? companyGroups
+    : '<p class="text-sm text-gray-400 py-4">No hay programas personalizados en ninguna empresa aún.</p>';
+
+  grid.innerHTML = `
+  <div class="flex flex-col lg:flex-row gap-6 items-start">
+
+    <!-- Columna izquierda: Globales -->
+    <div class="w-full lg:w-80 shrink-0">
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-50 bg-violet-50">
+          <h3 class="font-bold text-violet-800 text-sm">Programas globales</h3>
+          <p class="text-[11px] text-violet-500 mt-0.5">Predefinidos para todas las empresas</p>
+        </div>
+        <div class="p-4">${globalsHtml}</div>
+      </div>
+    </div>
+
+    <!-- Columna derecha: Personalizados por empresa -->
+    <div class="flex-1 min-w-0">
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-50 bg-gray-50">
+          <h3 class="font-bold text-gray-800 text-sm">Programas personalizados</h3>
+          <p class="text-[11px] text-gray-400 mt-0.5">Organizados por empresa</p>
+        </div>
+        <div class="p-4 space-y-2">${customsHtml}</div>
+      </div>
+    </div>
+
+  </div>`;
+  lucide.createIcons();
 }
 
 function renderHomeProgramsWidget() {
@@ -5805,7 +6221,9 @@ async function saveNewProgram() {
 
   const btn = document.getElementById('save-program-btn');
   btn.disabled = true;
-  const { isOk } = await window.programsSdk.create(currentUser.company_id, name, emoji);
+  const { isOk } = await window.programsSdk.create({
+    company_id: currentUser.company_id, name, emoji, custom: true, active: true,
+  });
   btn.disabled = false;
 
   if (isOk) {
@@ -6169,7 +6587,19 @@ function toggleNpEmployee(id) {
     `${_npSelectedEmployees.size} empleado${_npSelectedEmployees.size !== 1 ? 's' : ''} seleccionado${_npSelectedEmployees.size !== 1 ? 's' : ''}`;
 }
 
-function submitNewProgram(e) {
+async function _uploadProgramImage(dataUrl, programId) {
+  if (!dataUrl || !dataUrl.startsWith('data:')) return null;
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const path = `programs/${programId}-${Date.now()}.jpg`;
+    const { error } = await _sb.storage.from('image-library')
+      .upload(path, blob, { cacheControl: '3600', upsert: false, contentType: 'image/jpeg' });
+    if (error) { _log('program image upload error:', error.message); return null; }
+    return _sb.storage.from('image-library').getPublicUrl(path).data.publicUrl;
+  } catch (err) { _log('program image upload error:', err); return null; }
+}
+
+async function submitNewProgram(e) {
   e.preventDefault();
   const name = document.getElementById('np-name').value.trim();
   const tag  = document.getElementById('np-tag').value.trim().replace(/^#/, '');
@@ -6177,26 +6607,19 @@ function submitNewProgram(e) {
 
   let budget;
   if (_editingProgramId) {
-    const p         = companyPrograms.find(x => x.id === _editingProgramId);
-    const remaining = _getProgramRemainingBudget(p);
-    const added     = document.getElementById('np-budget-add').valueAsNumber || 0;
-    budget          = (p?.budget || 0) + added;
-    // Actualizar el remaining sumando los puntos recargados
-    if (added > 0) {
-      try { localStorage.setItem(_getBudgetKey(_editingProgramId), remaining + added); } catch (_) {}
-    }
+    const p     = companyPrograms.find(x => x.id === _editingProgramId);
+    const added = document.getElementById('np-budget-add').valueAsNumber || 0;
+    budget      = (p?.budget || 0) + added;
   } else {
     budget = document.getElementById('np-budget').valueAsNumber || 0;
   }
 
   const newProgram = {
-    id:          'custom_' + Date.now(),
     emoji:       _npSelectedEmoji,
     name,
     tag:         tag || name.toLowerCase().replace(/\s+/g, '-'),
     description: desc,
     budget,
-    image:       _npImageBase64 || null,
     employees:   [..._npSelectedEmployees],
     active:      true,
     custom:      true,
@@ -6205,7 +6628,7 @@ function submitNewProgram(e) {
   if (_editingProgramId) {
     const editingProg = companyPrograms.find(x => x.id === _editingProgramId);
 
-    // Global program: only update name/emoji/tag/description
+    // Global program: only update name/emoji/tag/description, persisted per company
     if (editingProg?.global) {
       const idx = companyPrograms.findIndex(x => x.id === _editingProgramId);
       if (idx !== -1) {
@@ -6217,7 +6640,9 @@ function submitNewProgram(e) {
           description: desc,
         };
       }
-      _saveGlobalOverrides();
+      await window.programsSdk.upsertOverride(currentUser.company_id, _editingProgramId, {
+        emoji: _npSelectedEmoji, name, tag: tag || name.toLowerCase().replace(/\s+/g, '-'), description: desc,
+      });
       closeNewProgramModal();
       renderProgramsPage();
       renderHomeProgramsWidget();
@@ -6232,7 +6657,7 @@ function submitNewProgram(e) {
     const added   = document.getElementById('np-budget-add').valueAsNumber || 0;
 
     if (!isAdmin && added > 0) {
-      _submitProgramApprovalRequest(
+      await _submitProgramApprovalRequest(
         { name: editingProg?.name || name, emoji: editingProg?.emoji || _npSelectedEmoji },
         added,
         _editingProgramId
@@ -6243,16 +6668,23 @@ function submitNewProgram(e) {
 
     const idx = companyPrograms.findIndex(x => x.id === _editingProgramId);
     if (idx !== -1) {
-      const old = companyPrograms[idx];
-      if (newProgram.budget !== old.budget) {
-        const oldRemaining = _getProgramRemainingBudget(old);
-        const diff = newProgram.budget - (old.budget || 0);
-        try { localStorage.setItem(_getBudgetKey(old.id), Math.max(0, oldRemaining + diff)); } catch (_) {}
-      }
-      newProgram.id = _editingProgramId;
-      companyPrograms[idx] = newProgram;
+      const old        = companyPrograms[idx];
+      const newRemaining = _getProgramRemainingBudget(old) + (budget - (old.budget || 0));
+      // _npImageBase64: null = cleared, data: URL = new upload, otherwise = unchanged existing URL
+      const imageUrl = (_npImageBase64 && _npImageBase64.startsWith('data:'))
+        ? (await _uploadProgramImage(_npImageBase64, _editingProgramId) || old.image_url || null)
+        : (_npImageBase64 || null);
+
+      const updates = {
+        emoji: newProgram.emoji, name: newProgram.name, tag: newProgram.tag,
+        description: newProgram.description, budget, budget_remaining: Math.max(0, newRemaining),
+        target_employee_ids: newProgram.employees, image_url: imageUrl,
+      };
+      await window.programsSdk.update(_editingProgramId, updates);
+      companyPrograms[idx] = {
+        ...old, ...updates, id: _editingProgramId, employees: newProgram.employees, image: imageUrl, custom: true,
+      };
     }
-    _saveCustomPrograms();
     closeNewProgramModal();
     renderProgramsPage();
     renderHomeProgramsWidget();
@@ -6283,81 +6715,35 @@ function submitNewProgram(e) {
       }
       updateAllPointsDisplays();
     }
-    _submitProgramApprovalRequest(newProgram, budget, null, fundingSource);
+    await _submitProgramApprovalRequest(newProgram, budget, null, fundingSource);
     closeNewProgramModal();
     return;
   }
 
-  companyPrograms.push(newProgram);
-  _saveCustomPrograms();
+  const { isOk, data } = await window.programsSdk.create({
+    company_id:          currentUser?.company_id,
+    name:                newProgram.name,
+    emoji:               newProgram.emoji,
+    tag:                 newProgram.tag,
+    description:         newProgram.description,
+    budget:              newProgram.budget,
+    budget_remaining:    newProgram.budget,
+    target_employee_ids: newProgram.employees,
+    custom:              true,
+    active:              true,
+    created_by:          currentUser?.__backendId || null,
+  });
+  if (!isOk) { showErrorToast('Error al crear el programa'); return; }
+
+  const imageUrl = await _uploadProgramImage(_npImageBase64, data.id);
+  if (imageUrl) await window.programsSdk.update(data.id, { image_url: imageUrl });
+
+  companyPrograms.push(_mapDbProgram({ ...data, image_url: imageUrl }));
   closeNewProgramModal();
   renderProgramsPage();
   renderHomeProgramsWidget();
   renderProgramsInModal();
   showSuccessToast(`Programa "${name}" creado`);
-}
-
-function _saveCustomPrograms() {
-  const custom = companyPrograms.filter(p => p.custom);
-  try { localStorage.setItem('allay_custom_programs', JSON.stringify(custom)); } catch (_) {}
-}
-
-function _loadCustomPrograms() {
-  try {
-    const stored = localStorage.getItem('allay_custom_programs');
-    if (stored) companyPrograms.push(...JSON.parse(stored));
-  } catch (_) {}
-}
-
-async function _syncApprovedPrograms() {
-  if (!currentUser?.__backendId || !window.approvalsSdk) return;
-  const { data } = await window.approvalsSdk.getProcessedForUser(currentUser.__backendId);
-  if (!data.length) return;
-
-  let changed = false;
-  data.forEach(row => {
-    const req = row.data || {};
-    const pendingId = req.pendingProgramId;
-    if (!pendingId) return;
-    const idx = companyPrograms.findIndex(p => p.id === pendingId);
-    if (idx === -1) return;
-
-    if (row.status === 'approved') {
-      companyPrograms[idx].pending = false;
-      companyPrograms[idx].active  = true;
-      changed = true;
-    } else if (row.status === 'rejected') {
-      companyPrograms.splice(idx, 1);
-      changed = true;
-    }
-  });
-
-  if (changed) {
-    _saveCustomPrograms();
-    renderHomeProgramsWidget();
-    renderProgramsInModal();
-    if (currentPage === 'programs') renderProgramsPage();
-  }
-}
-
-function _saveGlobalOverrides() {
-  const overrides = {};
-  companyPrograms.filter(p => p.global).forEach(p => {
-    overrides[p.id] = { emoji: p.emoji, name: p.name, tag: p.tag, description: p.description };
-  });
-  try { localStorage.setItem('allay_global_program_overrides', JSON.stringify(overrides)); } catch (_) {}
-}
-
-function _loadGlobalOverrides() {
-  try {
-    const stored = localStorage.getItem('allay_global_program_overrides');
-    if (!stored) return;
-    const overrides = JSON.parse(stored);
-    companyPrograms = companyPrograms.map(p => {
-      if (p.global && overrides[p.id]) return { ...p, ...overrides[p.id] };
-      return p;
-    });
-  } catch (_) {}
 }
 
 function toggleProgramMenu(id, e) {
@@ -6398,11 +6784,10 @@ function closeDeleteProgramModal() {
   _deletingProgramId = null;
 }
 
-function confirmDeleteProgram() {
+async function confirmDeleteProgram() {
   if (!_deletingProgramId) return;
   companyPrograms = companyPrograms.filter(p => p.id !== _deletingProgramId);
-  try { localStorage.removeItem(_getBudgetKey(_deletingProgramId)); } catch (_) {}
-  _saveCustomPrograms();
+  await window.programsSdk.delete(_deletingProgramId);
   closeDeleteProgramModal();
   renderProgramsPage();
   renderHomeProgramsWidget();
@@ -6490,10 +6875,9 @@ async function confirmSaDeleteProgram() {
     // isPending + request funding: admin never paid yet, no refund needed
   }
 
-  // Remove from local programs
+  // Remove from local programs and the database
   companyPrograms = companyPrograms.filter(p => p.id !== _saDeleteProgramId);
-  try { localStorage.removeItem(_getBudgetKey(_saDeleteProgramId)); } catch (_) {}
-  _saveCustomPrograms();
+  await window.programsSdk.delete(_saDeleteProgramId);
 
   // Cancel the pending request in Supabase if applicable
   const reqIdToCancel = _saDeleteRequestId || assocReq?.id;
@@ -6678,17 +7062,15 @@ function closeNewProgramModal() {
 
 function _getProgramRemainingBudget(p) {
   if (!p.budget) return 0;
-  try {
-    const stored = localStorage.getItem(_getBudgetKey(p.id));
-    return stored !== null ? parseInt(stored) : p.budget;
-  } catch (_) { return p.budget; }
+  return p.budget_remaining !== null && p.budget_remaining !== undefined ? p.budget_remaining : p.budget;
 }
 
 function _deductProgramBudget(id, points) {
   const p = companyPrograms.find(x => x.id === id);
   if (!p) return;
-  const remaining = _getProgramRemainingBudget(p);
-  try { localStorage.setItem(_getBudgetKey(id), Math.max(0, remaining - points)); } catch (_) {}
+  const remaining = Math.max(0, _getProgramRemainingBudget(p) - points);
+  p.budget_remaining = remaining;
+  window.programsSdk.update(id, { budget_remaining: remaining }).catch(_log);
 }
 
 //    Support Widget                                                             
