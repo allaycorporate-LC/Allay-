@@ -53,7 +53,7 @@
     }
   </script>
 
-  <script src="_sdk/data_sdk.js?v=47" type="text/javascript"></script>
+  <script src="_sdk/data_sdk.js?v=52" type="text/javascript"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
@@ -102,7 +102,7 @@
             <input type="checkbox" class="w-4 h-4 rounded border-gray-300 accent-celeste-500">
             <span class="text-gray-600">Recuérdame</span>
           </label>
-          <a href="#" class="text-celeste-600 hover:text-celeste-700 font-medium transition">¿Olvidaste tu contraseña?</a>
+          <a href="#" onclick="openForgotPassword(); return false;" class="text-celeste-600 hover:text-celeste-700 font-medium transition">¿Olvidaste tu contraseña?</a>
         </div>
 
         <div id="login-error" class="hidden p-3 rounded-lg bg-red-50 border border-red-200">
@@ -154,7 +154,7 @@
       <!-- Logo -->
       <div class="flex items-center gap-2 shrink-0">
         <img src="img/img/allay-logo.png" alt="Allay" class="h-12 object-contain cursor-pointer hover:opacity-80 transition"
-             onclick="closeAdminPage(); closeProfilePage(); switchPage('home');">
+             onclick="closeAdminPage(); closeProfilePage(); closeAnalyticsPage(); switchPage('home');">
       </div>
 
       <!-- Search -->
@@ -379,11 +379,11 @@
             <div class="flex gap-2 mt-1">
               <button onclick="openModal()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#3d2b56] text-[#3d2b56] text-xs font-semibold hover:bg-violet-50 transition">
                 <i data-lucide="gift" class="w-3 h-3"></i>
-                <span id="pts-give">150</span> pts para dar
+                <span id="pts-give">150</span> puntos para dar
               </button>
               <button onclick="openStore()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#f19ac4] text-[#e87cb4] text-xs font-semibold hover:bg-rosa-50 transition">
                 <i data-lucide="shopping-bag" class="w-3 h-3"></i>
-                <span id="pts-redeem">420</span> pts para canjear
+                <span id="pts-redeem">420</span> puntos para canjear
               </button>
             </div>
           </div>
@@ -419,7 +419,7 @@
                   <p class="text-sm"><span class="font-bold text-gray-800">Carlos Ruiz</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">María González</span></p>
                   <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> Hace 30 min · <span class="text-violet-500 font-medium">🏆 Trabajo en equipo</span></p>
                 </div>
-                <span class="shrink-0 bg-violet-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">+25 pts</span>
+                <span class="shrink-0 bg-violet-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">+25 puntos</span>
               </div>
               <p class="text-sm text-gray-700 leading-relaxed">María lideró la presentación del proyecto con una dedicación increíble. Su capacidad para coordinar al equipo y mantener todo en orden fue clave para el éxito. ¡Gracias por tu compromiso! 🚀</p>
             </div>
@@ -458,7 +458,7 @@
                   <p class="text-sm"><span class="font-bold text-gray-800">Ana López</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">Diego Torres</span></p>
                   <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> Hace 2 horas · <span class="text-rosa-500 font-medium">💡 Innovación</span></p>
                 </div>
-                <span class="shrink-0 bg-lila-400 text-white text-xs font-bold px-2.5 py-1 rounded-full">+30 pts</span>
+                <span class="shrink-0 bg-lila-400 text-white text-xs font-bold px-2.5 py-1 rounded-full">+30 puntos</span>
               </div>
               <p class="text-sm text-gray-700 leading-relaxed">Diego propuso una automatización que nos ahorró horas de trabajo manual cada semana. Su pensamiento creativo y proactivo es un ejemplo para todos. ¡Seguí así! 💡✨</p>
             </div>
@@ -493,7 +493,7 @@
                   <p class="text-sm"><span class="font-bold text-gray-800">Lucas Méndez</span> <span class="text-gray-400">reconoció a</span> <span class="font-bold text-violet-600">Sofía Herrera</span></p>
                   <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> Hace 5 horas · <span class="text-lila-500 font-medium">🤝 Colaboración</span></p>
                 </div>
-                <span class="shrink-0 bg-rosa-400 text-white text-xs font-bold px-2.5 py-1 rounded-full">+20 pts</span>
+                <span class="shrink-0 bg-rosa-400 text-white text-xs font-bold px-2.5 py-1 rounded-full">+20 puntos</span>
               </div>
               <p class="text-sm text-gray-700 leading-relaxed">Sofía siempre está dispuesta a ayudar. Esta semana me guió con el onboarding del nuevo cliente y todo salió perfecto. ¡Sos una genia! 🌟</p>
             </div>
@@ -722,11 +722,11 @@
         <div id="np-budget-status" class="hidden mb-3 rounded-xl bg-celeste-50 border border-celeste-200 px-4 py-3 flex items-center justify-between">
           <div>
             <p class="text-xs text-celeste-600 font-medium">Disponible actualmente</p>
-            <p class="text-lg font-bold text-celeste-700"><span id="np-budget-remaining">0</span> pts</p>
+            <p class="text-lg font-bold text-celeste-700"><span id="np-budget-remaining">0</span> puntos</p>
           </div>
           <div class="text-right">
             <p class="text-xs text-gray-400">Total original</p>
-            <p class="text-sm font-semibold text-gray-600"><span id="np-budget-total">0</span> pts</p>
+            <p class="text-sm font-semibold text-gray-600"><span id="np-budget-total">0</span> puntos</p>
           </div>
         </div>
 
@@ -749,7 +749,7 @@
                 class="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition">
             </div>
             <div class="flex items-center px-3 py-2.5 rounded-xl bg-gray-100 text-sm font-semibold text-gray-500 whitespace-nowrap">
-              Total: <span id="np-budget-preview" class="ml-1 text-celeste-700">0</span> pts
+              Total: <span id="np-budget-preview" class="ml-1 text-celeste-700">0</span> puntos
             </div>
           </div>
         </div>
@@ -1057,7 +1057,7 @@
         <div id="program-budget-info" class="hidden rounded-xl bg-celeste-50 border border-celeste-200 px-4 py-3">
           <div class="flex items-center justify-between mb-2">
             <span class="text-xs font-semibold text-celeste-700">Presupuesto del programa</span>
-            <span class="text-xs font-bold text-celeste-700"><span id="budget-remaining">0</span> pts disponibles</span>
+            <span class="text-xs font-bold text-celeste-700"><span id="budget-remaining">0</span> puntos disponibles</span>
           </div>
           <label class="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" id="use-program-budget" onchange="toggleBudgetSource()"
@@ -1065,13 +1065,14 @@
             <span class="text-xs text-celeste-800 font-medium">Usar puntos del programa</span>
           </label>
         </div>
-        <!-- Points toggle + slider -->
+        <!-- Points toggle + slider — hidden when store is disabled for this company -->
+        <div id="modal-points-section">
         <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
           <div class="flex items-center justify-between">
             <div>
               <div class="flex items-center gap-2">
                 <p class="text-sm font-medium text-gray-700">Agregar puntos</p>
-                <span class="text-xs text-violet-600 font-semibold bg-violet-50 px-2 py-0.5 rounded-full border border-violet-100">Tenés <span id="modal-pts-available">0</span> pts</span>
+                <span class="text-xs text-violet-600 font-semibold bg-violet-50 px-2 py-0.5 rounded-full border border-violet-100">Tenés <span id="modal-pts-available">0</span> puntos</span>
               </div>
               <p class="text-xs text-gray-400 mt-0.5">Opcional — podés reconocer sin dar puntos</p>
               <p id="no-points-msg" class="hidden text-xs text-amber-600 font-medium mt-0.5">No tenés puntos disponibles para asignar.</p>
@@ -1092,11 +1093,12 @@
                 class="text-lg font-bold text-violet-600 w-14 text-center border border-violet-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
                 oninput="updatePointsFromInput(this.value)"
                 onblur="clampPointsInput()">
-              <span class="text-xs text-gray-400">pts</span>
+              <span class="text-xs text-gray-400">puntos</span>
             </div>
             <p id="points-warning" class="text-xs text-red-500 mt-1 hidden">No tenés suficientes puntos</p>
           </div>
         </div>
+        </div><!-- /modal-points-section -->
 
         <!-- Preferencias de privacidad de destinatarios -->
         <div id="privacy-pref-hint" class="hidden flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-700">
@@ -1171,6 +1173,112 @@
 ══════════════════════════════════════ -->
 <div id="success-toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-violet-500 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 text-sm font-semibold" style="animation: scaleIn 0.3s ease">
   <i data-lucide="check-circle" class="w-5 h-5"></i> <span>¡Reconocimiento enviado! 🎉</span>
+</div>
+
+<!-- ══════════════════════════════════════
+     SUPERADMIN — CONFIG. AUTO-RECOG. POR EMPRESA
+══════════════════════════════════════ -->
+<div id="superadmin-ar-page" class="hidden fixed inset-0 z-40 bg-gray-50 flex flex-col h-full w-full">
+  <nav class="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm shrink-0">
+    <div class="flex items-center gap-3 px-4 md:px-6 h-16">
+      <button onclick="closeSuperadminArPage()" class="p-2 rounded-lg hover:bg-gray-100 transition">
+        <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+      </button>
+      <div class="w-8 h-8 rounded-xl bg-[#fff0f6] flex items-center justify-center shrink-0">
+        <i data-lucide="calendar-cog" class="w-4 h-4 text-[#f19ac4]"></i>
+      </div>
+      <h1 class="text-lg font-bold text-gray-800">Reconocimientos automáticos por empresa</h1>
+    </div>
+  </nav>
+  <main class="flex-1 overflow-y-auto px-4 md:px-6 py-6">
+    <div class="max-w-3xl mx-auto space-y-4 pb-20">
+      <div id="sa-ar-list" class="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-100 overflow-hidden">
+        <p class="text-center py-10 text-gray-400 text-sm">Cargando...</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════
+     FORGOT PASSWORD
+══════════════════════════════════════ -->
+<div id="forgot-password-page" class="hidden fixed inset-0 z-[210] bg-violet-50 overflow-y-auto">
+  <div class="flex min-h-full items-center justify-center py-12 px-4">
+  <div class="w-full max-w-md">
+    <!-- Logo -->
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600 to-celeste-500 shadow-lg mb-4">
+        <i data-lucide="key-round" class="w-8 h-8 text-white"></i>
+      </div>
+      <h2 class="text-2xl font-bold text-gray-800">Recuperar contraseña</h2>
+      <p class="text-gray-500 text-sm mt-1">Te enviamos un link para resetearla</p>
+    </div>
+
+    <!-- Step 1: email form -->
+    <div id="fp-form-step" class="bg-white rounded-2xl shadow-lg p-8 space-y-5">
+      <div>
+        <label for="fp-email" class="block text-sm font-semibold text-gray-700 mb-2">Tu email corporativo</label>
+        <input type="email" id="fp-email" placeholder="tu@empresa.com"
+          class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition">
+      </div>
+      <div id="fp-error" class="hidden p-3 rounded-lg bg-red-50 border border-red-200">
+        <p id="fp-error-text" class="text-sm text-red-600"></p>
+      </div>
+      <button id="fp-send-btn" onclick="sendPasswordReset()" class="w-full btn-recognize text-white py-3 rounded-xl font-semibold shadow-lg transition flex items-center justify-center gap-2">
+        <i data-lucide="send" class="w-4 h-4"></i> Enviar link de recuperación
+      </button>
+      <button onclick="closeForgotPassword()" class="w-full py-3 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition">
+        Volver al inicio de sesión
+      </button>
+    </div>
+
+    <!-- Step 2: confirmation -->
+    <div id="fp-sent-step" class="hidden bg-white rounded-2xl shadow-lg p-8 text-center space-y-4">
+      <div class="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto">
+        <i data-lucide="mail-check" class="w-8 h-8 text-green-600"></i>
+      </div>
+      <h3 class="text-xl font-bold text-gray-800">¡Revisá tu email!</h3>
+      <p class="text-sm text-gray-500">Te enviamos un link a <strong id="fp-sent-email" class="text-gray-700"></strong>. Hacé clic en él para crear una nueva contraseña.</p>
+      <p class="text-xs text-gray-400">Si no lo ves, revisá la carpeta de spam.</p>
+      <button onclick="closeForgotPassword()" class="w-full py-3 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition">
+        Volver al inicio de sesión
+      </button>
+    </div>
+  </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     RECOVERY — SET NEW PASSWORD
+══════════════════════════════════════ -->
+<div id="recovery-password-page" class="hidden fixed inset-0 z-[210] bg-violet-50 overflow-y-auto">
+  <div class="flex min-h-full items-center justify-center py-12 px-4">
+  <div class="w-full max-w-md">
+    <div class="text-center mb-8">
+      <img src="img/img/logo.png" alt="Allay" class="h-20 mx-auto mb-4 object-contain">
+      <h2 class="text-2xl font-bold text-gray-800">Nueva contraseña</h2>
+      <p class="text-gray-500 text-sm mt-1">Elegí una contraseña segura para tu cuenta</p>
+    </div>
+    <div class="bg-white rounded-2xl shadow-lg p-8 space-y-5">
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-2">Nueva contraseña</label>
+        <input type="password" id="rp-new-password" placeholder="Mínimo 8 caracteres"
+          class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition">
+      </div>
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-2">Confirmar contraseña</label>
+        <input type="password" id="rp-confirm-password" placeholder="Repetí la nueva contraseña"
+          class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-celeste-400 focus:border-transparent transition">
+      </div>
+      <div id="rp-error" class="hidden p-3 rounded-lg bg-red-50 border border-red-200">
+        <p id="rp-error-text" class="text-sm text-red-600"></p>
+      </div>
+      <button id="rp-save-btn" onclick="saveRecoveryPassword()" class="w-full btn-recognize text-white py-3 rounded-xl font-semibold shadow-lg transition flex items-center justify-center gap-2">
+        <i data-lucide="check" class="w-4 h-4"></i> Guardar nueva contraseña
+      </button>
+    </div>
+  </div>
+  </div>
 </div>
 
 <!-- ══════════════════════════════════════
@@ -1257,6 +1365,9 @@
     <button id="qnav-companies" onclick="adminScrollTo('superadmin-companies-section')" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
       <i data-lucide="building-2" class="w-3.5 h-3.5"></i> Empresas
     </button>
+    <button id="qnav-ar-companies" onclick="openSuperadminArPage()" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
+      <i data-lucide="calendar-cog" class="w-3.5 h-3.5"></i> Config. por empresa
+    </button>
     <button id="qnav-csv-requests" onclick="adminScrollTo('superadmin-csv-requests-section')" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
       <i data-lucide="file-check-2" class="w-3.5 h-3.5"></i> Solicitudes CSV
     </button>
@@ -1270,6 +1381,15 @@
 
   <main class="flex-1 px-4 md:px-6 py-6 md:py-8 overflow-y-auto">
     <div class="max-w-4xl mx-auto space-y-6 pb-20">
+
+      <!-- Banner: store desactivado (solo para admins de empresa) -->
+      <div id="admin-store-disabled-banner" class="hidden bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex items-start gap-3">
+        <i data-lucide="lock" class="w-5 h-5 text-amber-500 shrink-0 mt-0.5"></i>
+        <div>
+          <p class="text-sm font-semibold text-amber-800">La tienda y los reconocimientos con puntos están desactivados</p>
+          <p class="text-xs text-amber-600 mt-1">Para activar esta funcionalidad, contactá a tu ejecutivo de Allay.</p>
+        </div>
+      </div>
 
       <!-- CSV Upload -->
       <div id="admin-section-upload" class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
@@ -1541,20 +1661,31 @@
             <p class="text-sm font-semibold text-gray-700">Horario de envío <span class="text-[10px] font-medium text-gray-400 ml-1">UTC</span></p>
             <p class="text-xs text-gray-400 mt-0.5">Los reconocimientos se enviarán todos los días a esta hora (UTC). Argentina = UTC−3.</p>
           </div>
-          <div class="flex items-center gap-1 shrink-0">
+          <div class="flex items-center gap-2 shrink-0">
             <select id="ar-send-hour"
               class="text-sm font-semibold bg-white border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 text-[#3d2b56]">
               <!-- options injected by JS -->
             </select>
-            <span class="text-gray-400 font-bold">:</span>
-            <select id="ar-send-minute"
-              class="text-sm font-semibold bg-white border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 text-[#3d2b56]">
-              <option value="00">00</option>
-              <option value="15">15</option>
-              <option value="30">30</option>
-              <option value="45">45</option>
-            </select>
+            <span class="text-sm font-semibold text-gray-400">:00 hs</span>
           </div>
+        </div>
+
+        <!-- Email notification toggle -->
+        <div class="flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
+          <div class="w-9 h-9 rounded-xl bg-white border border-gray-200 flex items-center justify-center shrink-0">
+            <i data-lucide="mail" class="w-4 h-4 text-[#3d2b56]"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-gray-700">Notificación por email</p>
+            <p class="text-xs text-gray-400 mt-0.5">Enviar un email al empleado con el mensaje de reconocimiento y un botón para ir a la plataforma.</p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer shrink-0" onclick="event.stopPropagation()">
+            <input type="checkbox" id="ar-send-email" class="sr-only peer">
+            <div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-[#3d2b56]
+              after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+              after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all
+              peer-checked:after:translate-x-5"></div>
+          </label>
         </div>
 
         <!-- Calendario por mes -->
@@ -1613,7 +1744,7 @@
       </div>
       <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-50 border border-violet-200">
         <i data-lucide="coins" class="w-4 h-4 text-violet-600"></i>
-        <span id="store-points-display" class="text-sm font-bold text-violet-700">0 pts</span>
+        <span id="store-points-display" class="text-sm font-bold text-violet-700">0 puntos</span>
       </div>
     </div>
   </nav>
@@ -1996,15 +2127,15 @@
         <button onclick="closeProfilePage()" class="p-2 rounded-lg hover:bg-gray-100 transition"><i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i></button>
         <h1 class="text-xl font-bold text-gray-800">Configuración de perfil</h1>
       </div>
-      <div class="w-9 h-9 rounded-full bg-lila-400 flex items-center justify-center text-white text-sm font-bold">M</div>
+      <div id="profile-nav-avatar" class="w-9 h-9 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-sm font-bold">M</div>
     </div>
   </nav>
   <main class="flex-1 px-4 md:px-6 py-6 md:py-8 overflow-y-auto">
-    <div class="max-w-2xl mx-auto space-y-6 pb-20">
+    <div class="max-w-2xl mx-auto space-y-6 pb-32">
 
-      <!-- User info -->
+      <!-- User info (read-only) -->
       <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-        <div class="flex items-center gap-2 mb-5"><i data-lucide="lock" class="w-5 h-5 text-red-500"></i><h2 class="text-lg font-bold text-gray-800">Información del usuario</h2></div>
+        <div class="flex items-center gap-2 mb-5"><i data-lucide="lock" class="w-4 h-4 text-gray-400"></i><h2 class="text-lg font-bold text-gray-800">Información del usuario</h2><span class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full ml-1">Solo lectura</span></div>
         <div class="space-y-3">
           <div class="p-4 rounded-lg bg-gray-50 border border-gray-200"><p class="text-xs font-semibold text-gray-500 uppercase">Nombre</p><p id="profile-display-name" class="text-lg font-bold text-gray-800 mt-1">—</p></div>
           <div class="p-4 rounded-lg bg-gray-50 border border-gray-200"><p class="text-xs font-semibold text-gray-500 uppercase">Email</p><p id="profile-display-email" class="text-lg font-bold text-gray-800 mt-1">—</p></div>
@@ -2018,83 +2149,51 @@
         <div class="flex items-center gap-2 mb-5"><i data-lucide="eye" class="w-5 h-5 text-violet-500"></i><h2 class="text-lg font-bold text-gray-800">Preferencias de reconocimiento</h2></div>
         <div class="space-y-5">
           <div class="pb-5 border-b border-gray-100">
-            <p class="font-semibold text-gray-800 text-sm mb-1">Visibilidad de reconocimientos</p>
-            <p class="text-xs text-gray-500 mb-3">Controlá si otros pueden ver esta información</p>
+            <p class="font-semibold text-gray-800 text-sm mb-1">Visibilidad de mis reconocimientos</p>
+            <p class="text-xs text-gray-500 mb-3">Público: aparece en el feed. Privado: solo vos y quien lo envió lo ven.</p>
             <div class="flex gap-3">
-              <label class="flex items-center gap-2 cursor-pointer group"><input type="radio" name="recognition-visibility" value="public" checked class="w-4 h-4 accent-violet-500"><span class="text-sm text-gray-700 group-hover:text-violet-600">Público</span></label>
-              <label class="flex items-center gap-2 cursor-pointer group"><input type="radio" name="recognition-visibility" value="private" class="w-4 h-4 accent-violet-500"><span class="text-sm text-gray-700 group-hover:text-violet-600">Privado</span></label>
+              <label class="flex items-center gap-2 cursor-pointer group"><input type="radio" id="pref-cfg-vis-public" name="recognition-visibility" value="public" class="w-4 h-4 accent-violet-500"><span class="text-sm text-gray-700 group-hover:text-violet-600">Público</span></label>
+              <label class="flex items-center gap-2 cursor-pointer group"><input type="radio" id="pref-cfg-vis-private" name="recognition-visibility" value="private" class="w-4 h-4 accent-violet-500"><span class="text-sm text-gray-700 group-hover:text-violet-600">Privado</span></label>
             </div>
           </div>
           <div class="pb-5 border-b border-gray-100">
             <div class="flex items-center justify-between">
-              <div><p class="font-semibold text-gray-800 text-sm flex items-center gap-1">🎂 Mostrar / Ocultar mi cumpleaños</p><p class="text-xs text-gray-500 mt-1">Tu equipo verá tu cumpleaños en el calendario</p></div>
-              <label class="toggle-switch"><input type="checkbox" checked><span class="slider"></span></label>
+              <div><p class="font-semibold text-gray-800 text-sm">🎂 Reconocimiento automático de cumpleaños</p><p class="text-xs text-gray-500 mt-1">Tu empresa te enviará un reconocimiento en tu cumpleaños</p></div>
+              <label class="toggle-switch"><input type="checkbox" id="pref-cfg-birthday"><span class="slider"></span></label>
             </div>
           </div>
           <div>
             <div class="flex items-center justify-between">
-              <div><p class="font-semibold text-gray-800 text-sm flex items-center gap-1">🏢 Mostrar / Ocultar mi aniversario laboral</p><p class="text-xs text-gray-500 mt-1">Tu equipo verá tu aniversario en la empresa</p></div>
-              <label class="toggle-switch"><input type="checkbox" checked><span class="slider"></span></label>
+              <div><p class="font-semibold text-gray-800 text-sm">🏢 Reconocimiento automático de aniversario</p><p class="text-xs text-gray-500 mt-1">Tu empresa te enviará un reconocimiento en tu aniversario laboral</p></div>
+              <label class="toggle-switch"><input type="checkbox" id="pref-cfg-anniversary"><span class="slider"></span></label>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Notifications preferences -->
+      <!-- Change password -->
       <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-        <div class="flex items-center gap-2 mb-5"><i data-lucide="bell" class="w-5 h-5 text-violet-500"></i><h2 class="text-lg font-bold text-gray-800">Notificaciones</h2></div>
-        <div class="space-y-4" id="notification-prefs">
-          <!-- Notification row helper macro (inlined for each row) -->
-          <div class="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition">
-            <p class="font-semibold text-gray-800 text-sm mb-1">Nuevos reconocimientos</p>
-            <p class="text-xs text-gray-500 mb-3">Recibí notificaciones cuando alguien te reconozca</p>
-            <div class="flex gap-6">
-              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">En plataforma</span></label>
-              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">Por email</span></label>
-            </div>
+        <div class="flex items-center gap-2 mb-5"><i data-lucide="key" class="w-5 h-5 text-violet-500"></i><h2 class="text-lg font-bold text-gray-800">Cambiar contraseña</h2></div>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">Nueva contraseña</label>
+            <input type="password" id="cfg-new-password" placeholder="Mínimo 8 caracteres" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-violet-300">
           </div>
-          <div class="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition">
-            <p class="font-semibold text-gray-800 text-sm mb-1">Reacciones a mis reconocimientos</p>
-            <p class="text-xs text-gray-500 mb-3">Alguien reaccionó con un emoji a tu reconocimiento</p>
-            <div class="flex gap-6">
-              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">En plataforma</span></label>
-              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">Por email</span></label>
-            </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">Confirmar contraseña</label>
+            <input type="password" id="cfg-confirm-password" placeholder="Repetí la nueva contraseña" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-violet-300">
           </div>
-          <div class="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition">
-            <p class="font-semibold text-gray-800 text-sm mb-1">Comentarios en mis reconocimientos</p>
-            <p class="text-xs text-gray-500 mb-3">Alguien comentó en tu reconocimiento</p>
-            <div class="flex gap-6">
-              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">En plataforma</span></label>
-              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">Por email</span></label>
-            </div>
-          </div>
-          <div class="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition">
-            <p class="font-semibold text-gray-800 text-sm mb-1">Vencimiento de puntos</p>
-            <p class="text-xs text-gray-500 mb-3">Recordá cuando tus puntos estén por vencer</p>
-            <div class="flex gap-6">
-              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">En plataforma</span></label>
-              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" checked class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">Por email</span></label>
-            </div>
-          </div>
-          <div class="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition">
-            <p class="font-semibold text-gray-800 text-sm mb-1">Campañas de la empresa</p>
-            <p class="text-xs text-gray-500 mb-3">Enterate de nuevas campañas y promociones</p>
-            <div class="flex gap-6">
-              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">En plataforma</span></label>
-              <label class="flex items-center gap-2.5 cursor-pointer"><div class="relative"><input type="checkbox" class="sr-only peer"><div class="w-10 h-6 bg-gray-300 rounded-full peer-checked:bg-violet-500 transition"></div><div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-5 transition"></div></div><span class="text-sm text-gray-700">Por email</span></label>
-            </div>
-          </div>
+          <p id="cfg-pw-error" class="text-xs text-red-500 hidden"></p>
         </div>
       </div>
 
       <!-- Action buttons -->
-      <div class="flex gap-3 fixed bottom-0 left-0 right-0 bg-gray-50 pt-6 pb-6 px-4 md:px-6">
+      <div class="flex gap-3 fixed bottom-0 left-0 right-0 bg-gray-50 pt-4 pb-6 px-4 md:px-6 border-t border-gray-200">
         <div class="max-w-2xl mx-auto w-full flex gap-3">
           <button onclick="closeProfilePage()" class="flex-1 px-6 py-3 rounded-xl border-2 border-gray-200 text-gray-700 font-semibold hover:bg-gray-50 hover:border-gray-300 transition flex items-center justify-center gap-2">
             <i data-lucide="x" class="w-4 h-4"></i> Cancelar
           </button>
-          <button onclick="saveSettings()" class="flex-1 btn-recognize text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2">
+          <button id="cfg-save-btn" onclick="saveSettings()" class="flex-1 btn-recognize text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2">
             <i data-lucide="check" class="w-4 h-4"></i> Guardar cambios
           </button>
         </div>
@@ -3120,7 +3219,7 @@
       <div id="buy-points-summary" class="hidden bg-violet-50 border border-violet-100 rounded-xl px-4 py-3 mb-5">
         <div class="flex justify-between text-sm">
           <span class="text-gray-600">Puntos a agregar</span>
-          <span id="buy-pts-qty" class="font-bold text-violet-700">0 pts</span>
+          <span id="buy-pts-qty" class="font-bold text-violet-700">0 puntos</span>
         </div>
         <p class="text-[11px] text-gray-400 mt-1">El equipo de Allay procesará tu solicitud y te contactará para coordinar el pago.</p>
       </div>
@@ -3133,7 +3232,7 @@
   </div>
 </div>
 
-<script src="js/app.js?v=144"></script>
-<script src="js/analytics.js?v=8"></script>
+<script src="js/app.js?v=174"></script>
+<script src="js/analytics.js?v=11"></script>
 </body>
 </html>

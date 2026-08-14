@@ -146,7 +146,7 @@ function downloadProgramsCSV() {
 function _periodLabel(fromId, toId) {
   const f = document.getElementById(fromId)?.value || '';
   const t = document.getElementById(toId)?.value   || '';
-  if (f && t) return `${f} � ${t}`;
+  if (f && t) return `${f} → ${t}`;
   return f || t || 'Todo el período';
 }
 
@@ -172,7 +172,7 @@ function _openPDF(title, period, body) {
   const now = new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'});
   const w = window.open('','_blank');
   if (!w) { showErrorToast('Activá los pop-ups del navegador para el PDF'); return; }
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Allay � ${title}</title><style>
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Allay · ${title}</title><style>
 *{box-sizing:border-box}body{font-family:Calibri,Arial,sans-serif;margin:0;padding:0;color:#1f2937;font-size:13px;background:#fff}
 .hdr{background:#3d2b56;color:#fff;padding:22px 32px}.badge{font-size:9px;opacity:.65;letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px}
 .hdr h1{margin:0 0 5px;font-size:21px;font-weight:800}.hdr .period{font-size:11px;opacity:.75}
@@ -297,7 +297,7 @@ function downloadInteractionPDF() {
       d.teamStats.map(t=>[t.dept,t.sent,t.received,t.total]))}</div>
     <div class="sec"><h2>Detalle de interacciones</h2>
     ${_pdfTbl(['Equipo origen','Equipo destino','Reconocimientos'],
-      rows.length ? rows : [['Sin interacciones cross-equipo','�','�']])}</div>`);
+      rows.length ? rows : [['Sin interacciones cross-equipo','—','—']])}</div>`);
 }
 
 function downloadProgramsPDF() {
@@ -342,14 +342,14 @@ function downloadPatternPDF() {
   const n = d.weeklyEvolution.length, t3 = Math.max(1,Math.floor(n/3));
   const recent = n>=3 ? d.weeklyEvolution.slice(-t3).reduce((s,w)=>s+w.count,0)/t3 : 0;
   const early  = n>=3 ? d.weeklyEvolution.slice(0,t3).reduce((s,w)=>s+w.count,0)/t3 : 0;
-  const trend  = recent>early*1.15 ? '�  en aumento' : recent<early*0.85 ? '�  en descenso' : '�  estable';
+  const trend  = recent>early*1.15 ? '↑ en aumento' : recent<early*0.85 ? '↓ en descenso' : '→ estable';
   const slot   = peakHour<12 ? 'mañana' : peakHour<18 ? 'tarde' : 'noche';
 
   const insights = [
-    {icon:'�x&', title:'Día más activo', text:`${DAYS[peakDay]} concentra la mayor cantidad de reconocimientos del período.`},
-    {icon:'�x"�', title:'Horario pico',   text:`La actividad se concentra a la ${slot}, alrededor de las ${String(peakHour).padStart(2,'0')}:00.`},
-    {icon:'�x�', title:'Tendencia',      text:`La participación está ${trend} comparando el inicio vs el final del período.`},
-    {icon:'�x�', title:'Líderes',        text:`El ${d.adminPct}% de los reconocimientos son enviados por líderes (rol admin).`},
+    {icon:'📅', title:'Día más activo', text:`${DAYS[peakDay]} concentra la mayor cantidad de reconocimientos del período.`},
+    {icon:'🕐', title:'Horario pico',   text:`La actividad se concentra a la ${slot}, alrededor de las ${String(peakHour).padStart(2,'0')}:00.`},
+    {icon:'📈', title:'Tendencia',      text:`La participación está ${trend} comparando el inicio vs el final del período.`},
+    {icon:'👥', title:'Líderes',        text:`El ${d.adminPct}% de los reconocimientos son enviados por líderes (rol admin).`},
   ].map(i=>`<div class="icard"><div class="icon">${i.icon}</div><div><div class="it">${i.title}</div><div class="ib">${i.text}</div></div></div>`).join('');
 
   _openPDF('Patrones de participación', _periodLabel('pat-from','pat-to'),
@@ -360,7 +360,7 @@ function downloadPatternPDF() {
     <div class="sec"><h2>Comparación entre equipos</h2>${_chartImg('chart-pat-teams')}</div>
     <div class="sec"><h2>Insights</h2>${insights}</div>
     ${d.spikes.length?`<div class="sec"><h2>Momentos de alta actividad</h2>${
-      d.spikes.map(s=>`<div class="spike">�xa� <strong>${s.label}</strong> � ${s.count} reconocimientos (${d.mean>0?(s.count/d.mean).toFixed(1):'�'}� el promedio)</div>`).join('')
+      d.spikes.map(s=>`<div class="spike">⚡ <strong>${s.label}</strong> · ${s.count} reconocimientos (${d.mean>0?(s.count/d.mean).toFixed(1):'—'}× el promedio)</div>`).join('')
     }</div>`:''}`);
 }
 
@@ -442,7 +442,7 @@ function _initAnalyticsFilters() {
   ['summary-to','top-to','dept-to','analytics-to-month','eng-to','interact-to','prog-to','user-to','pat-to']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = to; });
 
-  // Company selector � only for superadmin not impersonating
+  // Company selector — only for superadmin not impersonating
   const sel = document.getElementById('analytics-company-filter');
   if (currentUser?.role === 'superadmin' && !isImpersonating) {
     sel.classList.remove('hidden');
@@ -472,7 +472,10 @@ async function onAnalyticsDateChange() {
 
 function closeAnalyticsPage() {
   destroyCharts();
-  document.getElementById('analytics-page').classList.add('hidden');
+  const el = document.getElementById('analytics-page');
+  if (!el) return;
+  el.classList.add('hidden');
+  el.style.display = 'none';
 }
 
 // ���� Insights page ��������������������������������������������������������������������������������������������������������������������������
@@ -648,7 +651,7 @@ function _generateAllInsights({ engagement, users, interaction, patterns, progra
       cats.riesgos.push({ type:'warning', icon:'moon', title:`${afterPct}% de los reconocimientos fuera del horario laboral`, text:'Una parte significativa se envía fuera de horario, lo que puede generar presión implícita.', recommendation:'Normalizá el reconocimiento durante el horario de trabajo con el ejemplo de los líderes.' });
     if (patterns.spikes?.length > 0) {
       const avg=patterns.mean||1, s0=patterns.spikes[0];
-      cats.positivos.push({ type:'positive', icon:'zap', title:`Las campañas internas aumentan la participación significativamente`, text:`En ${patterns.spikes.slice(0,2).map(s=>s.label).join(' y ')} se registró actividad ${Math.round(s0.count/avg)}� el promedio. Las iniciativas cortas son muy efectivas.`, recommendation:'Planificá campañas periódicas de 1-2 semanas para mantener el engagement alto todo el año.' });
+      cats.positivos.push({ type:'positive', icon:'zap', title:`Las campañas internas aumentan la participación significativamente`, text:`En ${patterns.spikes.slice(0,2).map(s=>s.label).join(' y ')} se registró actividad ${Math.round(s0.count/avg)}× el promedio. Las iniciativas cortas son muy efectivas.`, recommendation:'Planificá campañas periódicas de 1-2 semanas para mantener el engagement alto todo el año.' });
     }
   }
 
@@ -660,7 +663,7 @@ function _generateAllInsights({ engagement, users, interaction, patterns, progra
     if (recent > early*1.15)
       cats.positivos.push({ type:'positive', icon:'trending-up', title:`Participación en aumento: +${gPct}%`, text:'El reconocimiento creció de forma sostenida. El hábito se está consolidando en la organización.', recommendation:'Compartí esta tendencia positiva con los líderes para reforzar el comportamiento.' });
     else if (recent < early*0.85)
-      cats.riesgos.push({ type:'warning', icon:'trending-down', title:`Caída de engagement detectada: ��${Math.abs(gPct)}%`, text:'La actividad bajó comparada con el inicio del período. Puede estar relacionado con fatiga o cierres de campaña.', recommendation:'Identificá qué cambió durante este período y preparás una iniciativa de reactivación.' });
+      cats.riesgos.push({ type:'warning', icon:'trending-down', title:`Caída de engagement detectada: -${Math.abs(gPct)}%`, text:'La actividad bajó comparada con el inicio del período. Puede estar relacionado con fatiga o cierres de campaña.', recommendation:'Identificá qué cambió durante este período y preparás una iniciativa de reactivación.' });
     else
       cats.positivos.push({ type:'info', icon:'minus', title:'Participación estable en el período', text:'La actividad se mantiene constante. El hábito está instalado; el próximo desafío es seguir creciendo.', recommendation:'Considerá nuevos programas o reconocimientos grupales para dar el siguiente paso.' });
   }
@@ -769,9 +772,9 @@ function _timelineHTML(patterns) {
   const mean = counts.reduce((s,c)=>s+c,0)/counts.length;
   const stddev = Math.sqrt(counts.reduce((s,c)=>s+(c-mean)**2,0)/counts.length);
   const events = [{ week:weeks[0].label, type:'start', title:'Inicio del período analizado', text:`${weeks[0].count} reconocimientos en la primera semana.` }];
-  patterns.spikes?.forEach(s => events.push({ week:s.label, type:'spike', title:'Pico de actividad � posible campaña', text:`${s.count} reconocimientos (${Math.round(s.count/Math.max(mean,1))}� el promedio).` }));
-  weeks.filter(w=>w.count < mean - 1.5*stddev && w.count < mean*0.5).forEach(d => events.push({ week:d.label, type:'drop', title:'Caída de actividad', text:`${d.count} reconocimientos � por debajo del promedio.` }));
-  events.push({ week:weeks[weeks.length-1].label, type:'current', title:'�altima semana del período', text:`${weeks[weeks.length-1].count} reconocimientos registrados.` });
+  patterns.spikes?.forEach(s => events.push({ week:s.label, type:'spike', title:'Pico de actividad — posible campaña', text:`${s.count} reconocimientos (${Math.round(s.count/Math.max(mean,1))}× el promedio).` }));
+  weeks.filter(w=>w.count < mean - 1.5*stddev && w.count < mean*0.5).forEach(d => events.push({ week:d.label, type:'drop', title:'Caída de actividad', text:`${d.count} reconocimientos — por debajo del promedio.` }));
+  events.push({ week:weeks[weeks.length-1].label, type:'current', title:'Última semana del período', text:`${weeks[weeks.length-1].count} reconocimientos registrados.` });
   events.sort((a,b)=>a.week<b.week?-1:a.week>b.week?1:0);
   const cfg = { start:{c:'bg-blue-100 text-blue-600',i:'play'}, spike:{c:'bg-violet-100 text-[#3d2b56]',i:'zap'}, drop:{c:'bg-amber-100 text-amber-600',i:'alert-triangle'}, current:{c:'bg-green-100 text-green-600',i:'flag'} };
   return `<div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm mb-6">
@@ -899,7 +902,7 @@ function _buildHealthSectionHTML(score, comp, analysis, weeklyData, prevScore) {
   const deltaHTML = analysis.delta !== null
     ? `<span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${analysis.delta>=0?'bg-green-400/20 text-green-200':'bg-red-400/20 text-red-200'}">
         <i data-lucide="${analysis.delta>=0?'arrow-up':'arrow-down'}" class="w-3 h-3"></i>
-        ${analysis.delta>=0?'+':''}${analysis.delta} pts vs período anterior
+        ${analysis.delta>=0?'+':''}${analysis.delta} puntos vs período anterior
        </span>` : '';
 
   // Breakdown bars
@@ -1065,7 +1068,7 @@ function _generateExecSummary(data, score, components, fromM, toM) {
     highlights.push({ icon:up?'trending-up':dn?'trending-down':'minus',
       color:up?'text-green-600':dn?'text-amber-600':'text-gray-500',
       bg:up?'bg-green-50':dn?'bg-amber-50':'bg-gray-50',
-      text:`Tendencia de participación: ${up?'creciente':'dn'?'en descenso':'estable'}` });
+      text:`Tendencia de participación: ${up?'creciente':dn?'en descenso':'estable'}` });
   }
 
   // ���� Párrafos por sección ��������������������������������������������������������������������������������������������������������
@@ -1077,7 +1080,7 @@ function _generateExecSummary(data, score, components, fromM, toM) {
     const reception = eng.pctReceivers >= 70 ? ` El ${eng.pctReceivers}% de los colaboradores recibió al menos un reconocimiento, reflejo de una distribución saludable.`
       : ` El ${eng.pctReceivers}% de los colaboradores fue reconocido, lo que indica que una parte importante del equipo aún no experimenta el valor de la plataforma.`;
     const avgNote = eng.avgPerUser ? ` El promedio fue de ${eng.avgPerUser} reconocimientos por usuario activo.` : '';
-    pEngagement = `En el período evaluado (${fromM} � ${toM}), la organización registró ${participation}${reception}${avgNote}`;
+    pEngagement = `En el período evaluado (${fromM} → ${toM}), la organización registró ${participation}${reception}${avgNote}`;
   }
 
   let pReconocimiento = '';
@@ -1176,7 +1179,7 @@ function _buildExecSummaryHTML(summary, score, fromM, toM) {
             <span class="text-[10px] font-bold uppercase tracking-widest text-gray-400">Resumen Ejecutivo · Generado por IA</span>
           </div>
           <p class="text-base font-bold text-gray-900">${esc(companyName)} · Estado Cultural</p>
-          <p class="text-xs text-gray-500 mt-0.5">Período: ${fromM} � ${toM} &nbsp;·&nbsp; Generado el ${now}</p>
+          <p class="text-xs text-gray-500 mt-0.5">Período: ${fromM} → ${toM} &nbsp;·&nbsp; Generado el ${now}</p>
         </div>
         <button onclick="downloadExecSummaryPDF()" class="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#3d2b56] bg-[#ede9f7] rounded-lg hover:bg-violet-200 transition">
           <i data-lucide="download" class="w-3.5 h-3.5"></i> Exportar PDF
@@ -1218,34 +1221,51 @@ function _buildExecSummaryHTML(summary, score, fromM, toM) {
 function downloadExecSummaryPDF() {
   const card = document.getElementById('exec-summary-card');
   if (!card) { showErrorToast('Sin datos para exportar'); return; }
+  const w = window.open('', '_blank');
+  if (!w) { showErrorToast('Activá los pop-ups del navegador para el PDF'); return; }
   const clone = card.cloneNode(true);
-  // Remove the export button from the clone
   clone.querySelector('button[onclick]')?.remove();
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Resumen Ejecutivo � Allay</title>
-<style>
-*{box-sizing:border-box}body{font-family:Calibri,Arial,sans-serif;margin:0;padding:24px 32px;color:#1f2937;font-size:13px;background:#fff}
-.rnd{border-radius:12px}.border{border:1px solid #e5e7eb}.shadow{box-shadow:0 1px 4px rgba(0,0,0,.08)}
-.hdr-gray{background:#f9fafb;padding:14px 20px;border-bottom:1px solid #e5e7eb}
-.hdr-violet{background:#3d2b56;padding:10px 20px;display:flex;align-items:center;gap:10px}
-.badge{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
-.chips{display:flex;flex-wrap:wrap;gap:6px;padding:14px 20px;border-bottom:1px solid #f3f4f6}
-.chip{background:#f5f0fa;border:1px solid #e5e7eb;border-radius:20px;padding:4px 10px;font-size:11px;color:#374151}
-.body{padding:16px 20px}.sec{border-left:2px solid #c9a7d4;padding-left:12px;margin-bottom:14px}
-.sec-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#3d2b56;margin-bottom:4px}
-.sec-text{font-size:11.5px;color:#374151;line-height:1.6}
-.rec{background:#f5f0fa;border:1px solid #ede9f7;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:11px;color:#374151;display:flex;gap:8px;align-items:flex-start}
-.rec-num{width:18px;height:18px;background:#3d2b56;border-radius:50%;color:white;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
-.ftr{background:#f9fafb;padding:8px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:10px;color:#9ca3af}
-@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:.4in}}
-</style></head><body>
-<div class="rnd border shadow">${clone.innerHTML.replace(/<i data-lucide="[^"]*"[^>]*><\/i>/g, '').replace(/class="[^"]*"/g,'')}</div>
-<script>window.onload=()=>setTimeout(()=>window.print(),400)</script>
-</body></html>`;
-  // Use _openPDF for clean output
-  _openPDF('Resumen Ejecutivo � Allay',
-    `${currentUser?.company_id || 'Empresa'} · ${new Date().toLocaleDateString('es-AR')}`,
-    clone.querySelector('.px-6.py-5')?.innerHTML || ''
-  );
+  clone.querySelectorAll('i[data-lucide]').forEach(el => el.remove());
+  const now = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'long', year:'numeric' });
+  const css = [
+    '*{box-sizing:border-box}',
+    'body{font-family:Calibri,Arial,sans-serif;margin:0;padding:32px;background:#fff;color:#1f2937;font-size:13px}',
+    '.bg-gray-50{background:#f9fafb!important}.bg-white{background:#fff!important}',
+    '.bg-\\[\\#3d2b56\\]{background:#3d2b56!important}',
+    '.bg-\\[\\#f5f0fa\\]{background:#f5f0fa!important}',
+    '.bg-green-50{background:#f0fdf4!important}.bg-amber-50{background:#fffbeb!important}',
+    '.text-white{color:#fff!important}.text-gray-900{color:#111827!important}',
+    '.text-gray-700{color:#374151!important}.text-gray-500{color:#6b7280!important}',
+    '.text-gray-400{color:#9ca3af!important}.text-\\[\\#3d2b56\\]{color:#3d2b56!important}',
+    '.text-green-200{color:#bbf7d0!important}.text-amber-200{color:#fde68a!important}.text-red-200{color:#fecaca!important}',
+    '.bg-green-400\\/20{background:rgba(74,222,128,.2)!important}.bg-amber-400\\/20{background:rgba(251,191,36,.2)!important}',
+    '.font-bold{font-weight:700!important}.font-extrabold{font-weight:800!important}.font-semibold{font-weight:600!important}',
+    '.text-xs{font-size:12px!important}.text-sm{font-size:13px!important}.text-base{font-size:15px!important}.text-lg{font-size:18px!important}',
+    '.text-\\[10px\\]{font-size:10px!important}.text-\\[9px\\]{font-size:9px!important}',
+    '.uppercase{text-transform:uppercase!important}.tracking-widest{letter-spacing:.1em!important}',
+    '.px-6{padding-left:24px!important;padding-right:24px!important}.py-5{padding-top:20px!important;padding-bottom:20px!important}',
+    '.py-4{padding-top:16px!important;padding-bottom:16px!important}.py-3{padding-top:12px!important;padding-bottom:12px!important}',
+    '.pb-5{padding-bottom:20px!important}.px-4{padding-left:16px!important;padding-right:16px!important}',
+    '.pb-4{padding-bottom:16px!important}.px-3{padding-left:12px!important;padding-right:12px!important}',
+    '.py-2{padding-top:8px!important;padding-bottom:8px!important}.py-0\\.5{padding-top:2px!important;padding-bottom:2px!important}',
+    '.mb-1{margin-bottom:4px!important}.mb-2{margin-bottom:8px!important}.mb-2\\.5{margin-bottom:10px!important}.mb-6{margin-bottom:24px!important}',
+    '.mt-0\\.5{margin-top:2px!important}',
+    '.gap-2{gap:8px!important}.gap-3{gap:12px!important}.gap-1\\.5{gap:6px!important}',
+    '.flex{display:flex!important}.flex-wrap{flex-wrap:wrap!important}.items-center{align-items:center!important}',
+    '.items-start{align-items:flex-start!important}.justify-between{justify-content:space-between!important}.shrink-0{flex-shrink:0!important}',
+    '.space-y-4>*+*{margin-top:16px}.space-y-2>*+*{margin-top:8px}',
+    '.rounded-2xl{border-radius:16px!important}.rounded-full{border-radius:9999px!important}.rounded-lg{border-radius:8px!important}',
+    '.border{border:1px solid #e5e7eb!important}.border-b{border-bottom:1px solid #e5e7eb!important}',
+    '.border-\\[\\#ede9f7\\]{border-color:#ede9f7!important}',
+    '.overflow-hidden{overflow:hidden!important}.shadow-sm{box-shadow:0 1px 3px rgba(0,0,0,.08)!important}',
+    '.leading-relaxed{line-height:1.6!important}.leading-none{line-height:1!important}',
+    '.w-\\[3px\\]{width:3px!important}.self-stretch{align-self:stretch!important}.pl-4{padding-left:16px!important}',
+    '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;padding:0}@page{margin:.4in}}',
+  ].join('\n');
+  const body = clone.outerHTML;
+  const footer = `<div style="margin-top:24px;border-top:1px solid #e5e7eb;padding-top:8px;text-align:center;font-size:10px;color:#9ca3af">Allay · Resumen Ejecutivo generado el ${now}</div>`;
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Resumen Ejecutivo · Allay</title><style>' + css + '</style></head><body>' + body + footer + '<script>window.onload=()=>setTimeout(()=>window.print(),500)<\/script></body></html>');
+  w.document.close();
 }
 
 async function renderInsights() {
@@ -1264,7 +1284,7 @@ async function renderInsights() {
   const mkEndISO = m => { const b=new Date(m+'-01T00:00:00.000Z'); b.setUTCMonth(b.getUTCMonth()+1); b.setUTCMilliseconds(-1); return b.toISOString(); };
   const fromISO = mkISO(fromM), toISO = mkEndISO(toM);
 
-  // Previous period: 12�6 months ago
+  // Previous period: 12–6 months ago
   const prevToM   = new Date(now.getFullYear(), now.getMonth()-6, 1).toISOString().substring(0,7);
   const prevFromM = new Date(now.getFullYear(), now.getMonth()-11, 1).toISOString().substring(0,7);
   const prevFromISO = mkISO(prevFromM), prevToISO = mkEndISO(prevToM);
@@ -1346,7 +1366,7 @@ async function renderInsights() {
     `<div class="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm mb-6 flex items-center justify-between gap-3">
       <div>
         <p class="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-0.5">Período analizado</p>
-        <p class="text-sm font-semibold text-gray-800">${fromM} � ${toM}</p>
+        <p class="text-sm font-semibold text-gray-800">${fromM} → ${toM}</p>
       </div>
       <span class="text-xs bg-[#ede9f7] text-[#3d2b56] font-semibold px-3 py-1 rounded-full">${total} insight${total!==1?'s':''} detectado${total!==1?'s':''}</span>
     </div>` +
@@ -1542,7 +1562,7 @@ function _programInsightText({ distribution, total, top, least, unused, withActi
   if (withActivity.length >= 3) {
     const top3pct = Math.round((withActivity.slice(0, 3).reduce((s, d) => s + d.count, 0) / total) * 100);
     if (top3pct >= 80) {
-      parts.push(`El ${top3pct}% del total se concentra en solo 3 categorías � considerá impulsar las demás.`);
+      parts.push(`El ${top3pct}% del total se concentra en solo 3 categorías; considerá impulsar las demás.`);
     } else if (top3pct < 60) {
       parts.push('La distribución es bastante equilibrada entre categorías.');
     }
@@ -1583,14 +1603,14 @@ async function renderProgramsSection() {
     document.getElementById('prog-top-label').textContent  = top.label;
     document.getElementById('prog-top-count').textContent  = `${top.count} reconocimiento${top.count !== 1 ? 's' : ''} · ${Math.round((top.count / total) * 100)}%`;
   } else {
-    document.getElementById('prog-top-label').textContent  = '�';
+    document.getElementById('prog-top-label').textContent  = '—';
     document.getElementById('prog-top-count').textContent  = '';
   }
   if (least) {
     document.getElementById('prog-least-label').textContent  = least.label;
     document.getElementById('prog-least-count').textContent  = `${least.count} reconocimiento${least.count !== 1 ? 's' : ''} · ${Math.round((least.count / total) * 100)}%`;
   } else {
-    document.getElementById('prog-least-label').textContent  = top ? '(solo una categoría activa)' : '�';
+    document.getElementById('prog-least-label').textContent  = top ? '(solo una categoría activa)' : '—';
     document.getElementById('prog-least-count').textContent  = '';
   }
 
@@ -1709,7 +1729,7 @@ async function renderTeamInteractionSection() {
           textColor = intensity > 0.45 ? '#ffffff' : '#3d2b56';
         }
         const display = same ? '' : (val > 0 ? val : '');
-        return `<td class="text-center text-xs font-bold rounded-sm" style="${cellSize}background:${bg};color:${textColor}" title="${esc(fromDept)} �  ${esc(toDept)}: ${val}">${display}</td>`;
+        return `<td class="text-center text-xs font-bold rounded-sm" style="${cellSize}background:${bg};color:${textColor}" title="${esc(fromDept)} → ${esc(toDept)}: ${val}">${display}</td>`;
       }).join('');
 
       return `<tr>
@@ -1863,7 +1883,7 @@ async function renderDeptSection() {
 function _userCard(u, showPoints = false) {
   const initials = (u.name || '?').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
   const sub = showPoints
-    ? `${u.received} recibidos · ${u.pointsReceived} pts`
+    ? `${u.received} recibidos · ${u.pointsReceived} puntos`
     : `${u.received} recibidos · ${u.sent} enviados`;
   return `<div class="flex items-center gap-2">
     <div class="w-7 h-7 rounded-full ${getAvatarColor(u.name || '')} flex items-center justify-center text-white text-[10px] font-bold shrink-0">${esc(initials)}</div>
@@ -2019,13 +2039,13 @@ function _generatePatternInsights({ byDOW, byHour, weeklyEvolution, adminPct, to
         ? 'La actividad de reconocimiento <strong>viene creciendo</strong>. El equipo está construyendo un hábito sostenible de valoración mutua.'
         : trendDn
         ? 'La participación <strong>cayó hacia el final del período</strong>. Puede ser un buen momento para lanzar una iniciativa o campaña de reconocimiento.'
-        : 'La participación se mantuvo <strong>estable</strong> durante todo el período. El hábito está instalado � el próximo desafío es seguir creciendo.'),
+        : 'La participación se mantuvo <strong>estable</strong> durante todo el período. El hábito está instalado — el próximo desafío es seguir creciendo.'),
     card('blue', 'user-check', 'Líderes y cultura',
       adminPct >= 30
         ? `El <strong>${adminPct}%</strong> de los reconocimientos los inician los líderes. Su participación activa es clave para instalar y escalar la cultura.`
         : adminPct > 0
         ? `El <strong>${adminPct}%</strong> de los reconocimientos proviene de líderes. Cuando los managers reconocen más, el equipo los sigue naturalmente.`
-        : 'No se registraron reconocimientos de líderes en este período. El reconocimiento entre pares está activo � sumar el ejemplo desde arriba potencia el impacto.'),
+        : 'No se registraron reconocimientos de líderes en este período. El reconocimiento entre pares está activo — sumar el ejemplo desde arriba potencia el impacto.'),
   ];
 }
 
@@ -2165,12 +2185,12 @@ async function renderPatternSection() {
     if (spikesCount) spikesCount.textContent = d.spikes.length;
     if (spikesList) {
       spikesList.innerHTML = d.spikes.map(s => {
-        const ratio = d.mean > 0 ? (s.count / d.mean).toFixed(1) : '�';
+        const ratio = d.mean > 0 ? (s.count / d.mean).toFixed(1) : '—';
         return `<div class="flex items-center gap-3 p-3 rounded-xl bg-violet-50 border border-violet-100">
-          <div class="w-8 h-8 rounded-lg bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">�xa�</div>
+          <div class="w-8 h-8 rounded-lg bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">⚡</div>
           <div class="flex-1">
             <p class="text-sm font-semibold text-gray-800">${esc(s.label)}</p>
-            <p class="text-xs text-gray-500">${s.count} reconocimientos � ${ratio}� el promedio del período</p>
+            <p class="text-xs text-gray-500">${s.count} reconocimientos · ${ratio}× el promedio del período</p>
           </div>
         </div>`;
       }).join('');
@@ -2217,7 +2237,7 @@ async function refreshEngagementChart() {
   const toMonth   = document.getElementById('analytics-to-month')?.value   || '';
 
   const fromDate = fromMonth ? fromMonth + '-01' : null;
-  const toDate   = toMonth   ? toMonth   + '-31' : null;
+  const toDate   = toMonth   ? (() => { const d = new Date(toMonth + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth()+1); d.setUTCDate(0); return d.toISOString().slice(0,10); })() : null;
 
   const monthRes = await window.analyticsSdk.byRange(companyId, fromDate, toDate);
 
@@ -2255,7 +2275,7 @@ async function refreshEngagementChart() {
 }
 
 // ����������������������������������������������������������������������������������
-// GESTI�N DE PUNTOS
+// GESTIÓN DE PUNTOS
 // ����������������������������������������������������������������������������������
 function openPointsPage() {
   if (!_isApprover()) { showErrorToast('Solo administradores pueden ver la gestión de puntos'); return; }
@@ -2320,8 +2340,8 @@ async function renderPointsPage() {
   const avgAvail = empCount > 0 ? Math.round(available / empCount) : 0;
 
   document.getElementById('wallet-employees').textContent = empCount;
-  document.getElementById('wallet-avg').textContent       = avgUsed.toLocaleString('es-AR') + ' pts';
-  document.getElementById('wallet-per-emp').textContent   = avgAvail.toLocaleString('es-AR') + ' pts';
+  document.getElementById('wallet-avg').textContent       = avgUsed.toLocaleString('es-AR') + ' puntos';
+  document.getElementById('wallet-per-emp').textContent   = avgAvail.toLocaleString('es-AR') + ' puntos';
 
   // Employee distribution table
   const list = document.getElementById('wallet-employee-list');
@@ -2351,7 +2371,7 @@ async function renderPointsPage() {
           </div>
         </div>
       </div>
-      <span class="text-sm font-bold text-violet-700 shrink-0">${pts.toLocaleString('es-AR')} pts</span>
+      <span class="text-sm font-bold text-violet-700 shrink-0">${pts.toLocaleString('es-AR')} puntos</span>
     </div>`;
   }).join('');
 
@@ -2403,7 +2423,7 @@ function _renderPointsPrograms() {
         </div>
       </div>
       <div class="text-right shrink-0">
-        <p class="text-sm font-bold text-violet-700">${remaining.toLocaleString('es-AR')} pts</p>
+        <p class="text-sm font-bold text-violet-700">${remaining.toLocaleString('es-AR')} puntos</p>
         <p class="text-[10px] text-gray-400">de ${total.toLocaleString('es-AR')} totales</p>
       </div>
     </div>`;
@@ -2451,7 +2471,7 @@ function _renderPointsMovements(recs) {
         <p class="text-[10px] text-gray-400 mt-0.5 truncate">${prog}</p>
       </div>
       <div class="text-right shrink-0">
-        <p class="text-xs font-bold text-violet-700">-${pts.toLocaleString('es-AR')} pts</p>
+        <p class="text-xs font-bold text-violet-700">-${pts.toLocaleString('es-AR')} puntos</p>
         <p class="text-[10px] text-gray-400">${date}</p>
       </div>
     </div>`;
@@ -2503,7 +2523,7 @@ function onBuyPointsInput() {
 function _updateBuyPointsSummary(pts) {
   const valid = pts >= 100;
   document.getElementById('buy-points-summary').classList.toggle('hidden', !valid);
-  document.getElementById('buy-pts-qty').textContent = pts.toLocaleString('es-AR') + ' pts';
+  document.getElementById('buy-pts-qty').textContent = pts.toLocaleString('es-AR') + ' puntos';
   document.getElementById('buy-points-btn').disabled = !valid;
 }
 
@@ -2553,7 +2573,7 @@ function _renderPointsRequestBanner(req) {
       banner.innerHTML = `
         <div class="bg-red-50 border border-red-100 rounded-2xl px-5 py-4 flex items-center gap-3">
           <i data-lucide="x-circle" class="w-5 h-5 text-red-500 shrink-0"></i>
-          <p class="text-sm text-red-700">Tu solicitud de <strong>${req.points.toLocaleString('es-AR')} pts</strong> fue rechazada. Contactá al equipo de Allay para más información.</p>
+          <p class="text-sm text-red-700">Tu solicitud de <strong>${req.points.toLocaleString('es-AR')} puntos</strong> fue rechazada. Contactá al equipo de Allay para más información.</p>
         </div>`;
       lucide.createIcons();
     }
@@ -2565,13 +2585,13 @@ function _renderPointsRequestBanner(req) {
     banner.innerHTML = `
       <div class="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-4 flex items-center gap-3">
         <i data-lucide="clock" class="w-5 h-5 text-amber-500 shrink-0"></i>
-        <p class="text-sm text-amber-700">Solicitud de <strong>${req.points.toLocaleString('es-AR')} pts</strong> en proceso. El equipo de Allay te contactará para coordinar el pago.</p>
+        <p class="text-sm text-amber-700">Solicitud de <strong>${req.points.toLocaleString('es-AR')} puntos</strong> en proceso. El equipo de Allay te contactará para coordinar el pago.</p>
       </div>`;
   } else if (req.status === 'approved') {
     banner.innerHTML = `
       <div class="bg-green-50 border border-green-100 rounded-2xl px-5 py-4 flex items-center gap-3">
         <i data-lucide="check-circle" class="w-5 h-5 text-green-500 shrink-0"></i>
-        <p class="text-sm text-green-700 flex-1">Tu solicitud de <strong>${req.points.toLocaleString('es-AR')} pts</strong> fue aprobada. Los puntos se acreditarán a la brevedad.</p>
+        <p class="text-sm text-green-700 flex-1">Tu solicitud de <strong>${req.points.toLocaleString('es-AR')} puntos</strong> fue aprobada. Los puntos se acreditarán a la brevedad.</p>
         <button onclick="this.closest('#points-request-banner').classList.add('hidden')" class="p-1 rounded-full hover:bg-green-100 transition shrink-0">
           <i data-lucide="x" class="w-4 h-4 text-green-400"></i>
         </button>
@@ -2611,7 +2631,7 @@ async function _renderSuperadminPointsRequests(pending) {
         <p class="text-sm font-medium text-gray-800 truncate">${esc(company?.name || req.company_id)}</p>
         <p class="text-xs text-gray-400 truncate">${esc(requester?.name || 'Admin')} · ${formatTimeAgo(req.created_at)}</p>
       </div>
-      <span class="text-sm font-bold text-violet-700 shrink-0">${req.points.toLocaleString('es-AR')} pts</span>
+      <span class="text-sm font-bold text-violet-700 shrink-0">${req.points.toLocaleString('es-AR')} puntos</span>
       <div class="flex gap-2 shrink-0">
         <button onclick='rejectPointsPurchaseRequest(${JSON.stringify(req.id)})' class="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition">Rechazar</button>
         <button onclick='approvePointsPurchaseRequest(${JSON.stringify(req.id)})' class="px-3 py-1.5 rounded-lg bg-violet-500 text-white text-xs font-semibold hover:opacity-90 transition">Aprobar</button>

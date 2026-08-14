@@ -363,6 +363,14 @@ window.recognitionSdk = {
     return _sb.channel(name).on('postgres_changes', opts, callback).subscribe();
   },
 
+  // Subscribe to new comments (INSERT) — RLS filters to the user's visible recognitions
+  subscribeToComments(callback) {
+    const name = `comments-rt-${Date.now()}`;
+    return _sb.channel(name)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments' }, callback)
+      .subscribe();
+  },
+
   unsubscribeChannel(ch) {
     if (ch) _sb.removeChannel(ch);
   }
@@ -511,6 +519,16 @@ window.companySdk = {
     if (error) _log('companies list error:', error.message);
     return { isOk: !error, data: data || [] };
   },
+  async getById(companyId) {
+    const { data, error } = await _sb.from('companies').select('*').eq('id', companyId).maybeSingle();
+    if (error) _log('companies getById error:', error.message);
+    return { isOk: !error, data };
+  },
+  async update(id, updates) {
+    const { error } = await _sb.from('companies').update(updates).eq('id', id);
+    if (error) _log('companies update error:', error.message);
+    return { isOk: !error };
+  },
   async create(id, name, domain) {
     const { data, error } = await _sb.from('companies').insert({ id, name, domain }).select().single();
     if (error) _log('companies create error:', error.message);
@@ -525,13 +543,29 @@ window.companySdk = {
 
 // ─── Support SDK ──────────────────────────────────────────────────────────────
 window.supportSdk = {
-  async submit({ userId, companyId, name, email, subject, message }) {
-    const { error } = await _sb.from('support_requests').insert({
-      user_id: userId || null, company_id: companyId || null,
-      name, email, subject, message,
-    });
-    if (error) _log('support submit error:', error.message);
-    return { isOk: !error };
+  async submit({ subject, message }) {
+    try {
+      const { data: { session } } = await _sb.auth.getSession();
+      const token = session?.access_token || SUPABASE_ANON_KEY;
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/send-support-request`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ subject, message }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _log('support submit error:', err);
+        return { isOk: false };
+      }
+      return { isOk: true };
+    } catch (e) {
+      _log('support submit exception:', e);
+      return { isOk: false };
+    }
   },
 };
 
@@ -788,6 +822,15 @@ window.analyticsSdk = {
   },
 
   async _fetchPrograms(companyId, fromISO = null, toISO = null) {
+    // Use edge function for superadmin cross-company queries (bypasses RLS)
+    // Use direct query for regular admins (RLS allows own company data)
+    const _all = window.allUsers || (typeof allUsers !== 'undefined' ? allUsers : []);
+    const me = _all.find(u => u.__backendId === (window.currentUser?.id || currentUser?.id));
+    const isSuperadmin = (window.currentUser?.role || currentUser?.role) === 'superadmin';
+    const myCompanyId  = (window.currentUser?.company_id || currentUser?.company_id);
+    if (isSuperadmin && companyId && companyId !== myCompanyId) {
+      return this._fetch(companyId, fromISO, toISO);
+    }
     try {
       let q = _sb.from('recognitions')
         .select('id, program, points, from_user_id, to_user_id, created_at, company_id')

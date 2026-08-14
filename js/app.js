@@ -1,4 +1,4 @@
-// ------------------------------------------------------------
+﻿// ------------------------------------------------------------
 var _isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 var _log   = _isDev ? (...a) => console.error(...a) : () => {};
 
@@ -58,7 +58,7 @@ function _applySidebarState() {
 function _closeAllOverlays() {
   const ids = ['profile-page','admin-page','analytics-page','store-page',
                 'notifications-page','programs-page','approvals-page','points-page',
-                'user-profile-page','other-profile-page'];
+                'user-profile-page','other-profile-page','superadmin-ar-page'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.classList.add('hidden'); el.style.display = 'none'; }
@@ -138,6 +138,7 @@ let currentUser = null;
 let _companyMemberIds = null; // pre-computed Set, rebuilt only when allUsers changes
 let originalSuperadminUser = null;
 let isImpersonating = false;
+let _storeEnabled = true; // per-company flag: false = tienda y puntos desactivados
 let allUsers = [];
 let isLoggedIn = false;
 let _approvalsQueue   = [];
@@ -284,7 +285,9 @@ async function handleLogin(e) {
       loadNotifications();
       loadCompanyPrograms().then(() => _loadApprovals());
       loadHomeSidebar();
+      loadCurrentCompanySettings();
       _setupFeedRealtime();
+      _setupCommentsRealtime();
       renderWeeklyRecap();
       _applySidebarState();
       _initSidebarTooltip();
@@ -302,11 +305,165 @@ async function handleLogin(e) {
   }
 }
 
+// ── Forgot / Reset password flow ─────────────────────────────────────────────
+
+function openForgotPassword() {
+  document.getElementById('fp-email').value = '';
+  document.getElementById('fp-error').classList.add('hidden');
+  document.getElementById('fp-form-step').classList.remove('hidden');
+  document.getElementById('fp-sent-step').classList.add('hidden');
+  document.getElementById('forgot-password-page').classList.remove('hidden');
+}
+
+function closeForgotPassword() {
+  document.getElementById('forgot-password-page').classList.add('hidden');
+}
+
+async function sendPasswordReset() {
+  const emailEl = document.getElementById('fp-email');
+  const errorDiv = document.getElementById('fp-error');
+  const errorText = document.getElementById('fp-error-text');
+  const btn = document.getElementById('fp-send-btn');
+  const email = emailEl.value.trim();
+
+  if (!email) {
+    errorText.textContent = 'Ingresá tu email para continuar.';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Enviando...';
+  lucide.createIcons({ nodes: [btn] });
+  errorDiv.classList.add('hidden');
+
+  const redirectTo = window.location.origin + window.location.pathname;
+  const { error } = await window._sb.auth.resetPasswordForEmail(email, { redirectTo });
+
+  btn.disabled = false;
+  btn.innerHTML = '<i data-lucide="send" class="w-4 h-4"></i> Enviar link de recuperación';
+  lucide.createIcons({ nodes: [btn] });
+
+  if (error) {
+    errorText.textContent = 'No pudimos enviar el email. Verificá la dirección e intentá de nuevo.';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  document.getElementById('fp-sent-email').textContent = email;
+  document.getElementById('fp-form-step').classList.add('hidden');
+  document.getElementById('fp-sent-step').classList.remove('hidden');
+}
+
+function _openRecoveryPasswordPage() {
+  document.getElementById('rp-new-password').value = '';
+  document.getElementById('rp-confirm-password').value = '';
+  document.getElementById('rp-error').classList.add('hidden');
+  document.getElementById('forgot-password-page').classList.add('hidden');
+  document.getElementById('login-page').classList.remove('hidden');
+  document.getElementById('recovery-password-page').classList.remove('hidden');
+  lucide.createIcons();
+}
+
+async function saveRecoveryPassword() {
+  const newPw  = document.getElementById('rp-new-password').value.trim();
+  const confPw = document.getElementById('rp-confirm-password').value.trim();
+  const errorDiv  = document.getElementById('rp-error');
+  const errorText = document.getElementById('rp-error-text');
+  const btn = document.getElementById('rp-save-btn');
+
+  errorDiv.classList.add('hidden');
+
+  if (newPw.length < 8) {
+    errorText.textContent = 'La contraseña debe tener al menos 8 caracteres.';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+  if (newPw !== confPw) {
+    errorText.textContent = 'Las contraseñas no coinciden.';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Guardando...';
+  lucide.createIcons({ nodes: [btn] });
+
+  const { error } = await window._sb.auth.updateUser({ password: newPw });
+
+  btn.disabled = false;
+  btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Guardar nueva contraseña';
+  lucide.createIcons({ nodes: [btn] });
+
+  if (error) {
+    errorText.textContent = 'No se pudo guardar la contraseña: ' + error.message;
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  // Sign out recovery session so user logs in with new credentials
+  await window._sb.auth.signOut();
+  document.getElementById('recovery-password-page').classList.add('hidden');
+  showSuccessToast('¡Contraseña actualizada! Iniciá sesión con tu nueva contraseña.');
+}
+
+// Detect Supabase PASSWORD_RECOVERY event (user clicked the email link)
+window._sb.auth.onAuthStateChange((event) => {
+  if (event === 'PASSWORD_RECOVERY') {
+    _openRecoveryPasswordPage();
+  }
+});
+
+// ── Company settings ──────────────────────────────────────────────────────────
+
+async function loadCurrentCompanySettings() {
+  if (currentUser?.role === 'superadmin' && !isImpersonating) {
+    _storeEnabled = true;
+    _applyStoreMode();
+    return;
+  }
+  const companyId = currentUser?.company_id;
+  if (!companyId) { _storeEnabled = true; _applyStoreMode(); return; }
+
+  // Use cached _companiesData if already loaded (superadmin impersonating)
+  const cached = _companiesData.find(c => c.id === companyId);
+  if (cached) {
+    _storeEnabled = cached.store_enabled !== false;
+    _applyStoreMode();
+    return;
+  }
+
+  const { isOk, data } = await window.companySdk.getById(companyId);
+  _storeEnabled = (isOk && data) ? data.store_enabled !== false : true;
+  _applyStoreMode();
+}
+
+function _applyStoreMode() {
+  // Points section in recognition modal
+  const modalPts = document.getElementById('modal-points-section');
+  if (modalPts) modalPts.classList.toggle('hidden', !_storeEnabled);
+
+  // Store nav points display
+  const storeNav = document.getElementById('store-points-display');
+  if (storeNav) storeNav.parentElement?.classList.toggle('hidden', !_storeEnabled);
+
+  // Admin banner (only for company admins, not superadmin)
+  const banner = document.getElementById('admin-store-disabled-banner');
+  if (banner) {
+    const showBanner = !_storeEnabled && currentUser?.role === 'admin' && !isImpersonating;
+    banner.classList.toggle('hidden', !showBanner);
+  }
+}
+
 function logout() {
   // Tear down realtime channels before clearing session
   if (_feedRealtimeChannel) {
     window.recognitionSdk.unsubscribeChannel(_feedRealtimeChannel);
     _feedRealtimeChannel = null;
+  }
+  if (_commentsRealtimeChannel) {
+    window.recognitionSdk.unsubscribeChannel(_commentsRealtimeChannel);
+    _commentsRealtimeChannel = null;
   }
   clearTimeout(_feedRefreshTimer);
   _feedRefreshTimer = null;
@@ -724,13 +881,24 @@ function handleFileSelect(input) {
 }
 
 function parseCSV(csvText) {
-  const lines   = csvText.split('\n').filter(l => l.trim());
-  const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
+  // Normalize line endings and strip BOM
+  const normalized = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^﻿/, '');
+  const lines = normalized.split('\n').filter(l => l.trim().replace(/;+$/, '').replace(/,+$/, ''));
+
+  // Auto-detect separator: whichever appears more in the header row
+  const headerRaw = lines[0];
+  const sep = (headerRaw.split(';').length > headerRaw.split(',').length) ? ';' : ',';
+
+  const splitRow = row => row.split(sep).map(c => c.trim());
+  const headers = splitRow(headerRaw).map(h => h.toLowerCase().replace(/[À-ÿ]/g, c => {
+    // normalize accented chars that may appear garbled (e.g. contraseÃ±a → contraseña)
+    try { return decodeURIComponent(escape(c)); } catch { return c; }
+  }));
 
   const idx = (keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
   const nameIdx         = idx(['nombre', 'name']);
   const emailIdx        = idx(['email', 'correo']);
-  const passwordIdx     = idx(['contraseña', 'password', 'pass']);
+  const passwordIdx     = idx(['contraseña', 'password', 'contrase', 'pass']);
   const deptIdx         = idx(['departamento', 'department', 'depto']);
   const companyIdx      = idx(['empresa', 'company_id', 'company']);
   const roleIdx         = idx(['rol', 'role']);
@@ -744,28 +912,31 @@ function parseCSV(csvText) {
   const toUpdate     = [];
 
   for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(',').map(c => c.trim());
-    if (cols.length >= 5 && cols[0]) {
+    const cols = splitRow(lines[i]);
+    // Require at least name + email (2 cols); everything else has defaults
+    if (cols.length >= 2 && cols[0]) {
       const email = cols[emailIdx] || cols[1];
       const existing = allUsers.find(emp => emp.email === email);
       if (existing) { duplicates.push(email); toUpdate.push({ existing, cols }); continue; }
       const rawRole = (roleIdx !== -1 ? cols[roleIdx] : '') || 'employee';
       const validRole = ['employee', 'admin', 'superadmin'].includes(rawRole) ? rawRole : 'employee';
 
-      // Birthday: acepta DD/MM o MM/DD o DD-MM — normaliza a DD/MM
+      // Birthday: acepta DD/MM, DD-MM, o DD/MM/YYYY (ignora el año) — normaliza a DD/MM
       let birthday = null;
       if (birthdayIdx !== -1 && cols[birthdayIdx]) {
-        const raw = cols[birthdayIdx].replace(/-/g, '/');
-        if (/^\d{1,2}\/\d{1,2}$/.test(raw)) birthday = raw.padStart(5, '0').substring(0, 5);
+        const raw = cols[birthdayIdx].trim().replace(/-/g, '/');
+        const mDMY = raw.match(/^(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?$/);
+        if (mDMY) birthday = `${mDMY[1].padStart(2,'0')}/${mDMY[2].padStart(2,'0')}`;
       }
-      // Anniversary: acepta YYYY-MM-DD o DD/MM/YYYY — normaliza a YYYY-MM-DD
+      // Anniversary: acepta YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY — normaliza a YYYY-MM-DD
       let anniversary_date = null;
       if (anniversaryIdx !== -1 && cols[anniversaryIdx]) {
-        const raw = cols[anniversaryIdx];
-        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) anniversary_date = raw;
-        else if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) {
-          const [d, m, y] = raw.split('/');
-          anniversary_date = `${y}-${m}-${d}`;
+        const raw = cols[anniversaryIdx].trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+          anniversary_date = raw;
+        } else if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(raw)) {
+          const parts = raw.split(/[\/\-]/);
+          anniversary_date = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
         }
       }
 
@@ -804,7 +975,7 @@ async function uploadEmployees() {
     const { employees: newEmps, duplicates, toUpdate, birthdayIdx, anniversaryIdx } = parseCSV(e.target.result);
 
     if (newEmps.length === 0 && toUpdate.length === 0) {
-      showErrorToast('No se pudieron procesar empleados del archivo');
+      showErrorToast('No se encontraron filas válidas en el CSV. Verificá que tenga al menos las columnas "nombre" y "email".');
       return;
     }
 
@@ -844,16 +1015,18 @@ async function uploadEmployees() {
     for (const { existing, cols } of toUpdate) {
       let birthday = null;
       if (birthdayIdx !== -1 && cols[birthdayIdx]) {
-        const raw = cols[birthdayIdx].replace(/-/g, '/');
-        if (/^\d{1,2}\/\d{1,2}$/.test(raw)) birthday = raw.padStart(5, '0').substring(0, 5);
+        const raw = cols[birthdayIdx].trim().replace(/-/g, '/');
+        const mDMY = raw.match(/^(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?$/);
+        if (mDMY) birthday = `${mDMY[1].padStart(2,'0')}/${mDMY[2].padStart(2,'0')}`;
       }
       let anniversary_date = null;
       if (anniversaryIdx !== -1 && cols[anniversaryIdx]) {
-        const raw = cols[anniversaryIdx];
-        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) anniversary_date = raw;
-        else if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) {
-          const [d, m, y] = raw.split('/');
-          anniversary_date = `${y}-${m}-${d}`;
+        const raw = cols[anniversaryIdx].trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+          anniversary_date = raw;
+        } else if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(raw)) {
+          const parts = raw.split(/[\/\-]/);
+          anniversary_date = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
         }
       }
       await window.dataSdk.updateDates(existing.__backendId, birthday, anniversary_date);
@@ -1692,8 +1865,8 @@ function _renderOppFeed() {
       : `<span class="text-[10px] font-bold uppercase tracking-wide text-[#e87cb4] bg-pink-50 px-2 py-0.5 rounded-full">Recibido</span>`;
     const ptsBadge = points > 0
       ? isSent
-        ? `<span class="text-xs font-semibold text-[#3d2b56]">-${points} pts</span>`
-        : `<span class="text-xs font-semibold text-[#e87cb4]">+${points} pts</span>`
+        ? `<span class="text-xs font-semibold text-[#3d2b56]">-${points} puntos</span>`
+        : `<span class="text-xs font-semibold text-[#e87cb4]">+${points} puntos</span>`
       : '';
     return `<div class="flex items-start gap-3 py-3 border-b border-gray-50 last:border-0">
       <div class="w-9 h-9 rounded-full ${getAvatarColor(other)} flex items-center justify-center text-white text-sm font-bold shrink-0">${initial}</div>
@@ -1867,7 +2040,7 @@ async function openPeekProfile(u) {
       </div>
       ${u.bio ? `<p class="text-sm text-gray-500 leading-snug max-w-xs">${esc(u.bio)}</p>` : ''}
       <div class="flex gap-6 text-center">
-        ${u.points_received != null ? `<div><p class="text-lg font-bold text-[#e87cb4]">${u.points_received ?? 0}</p><p class="text-[10px] text-gray-400">pts recibidos</p></div>` : ''}
+        ${u.points_received != null ? `<div><p class="text-lg font-bold text-[#e87cb4]">${u.points_received ?? 0}</p><p class="text-[10px] text-gray-400">puntos recibidos</p></div>` : ''}
       </div>
       <button onclick="openRecognitionFromPeek('${esc(u.__backendId)}')"
         class="btn-recognize text-white px-5 py-2 rounded-full text-sm font-semibold flex items-center gap-1.5">
@@ -1907,7 +2080,7 @@ async function openPeekProfile(u) {
       ? `<span class="text-[9px] font-bold text-[#3d2b56] bg-violet-50 px-1.5 py-0.5 rounded-full">Dado</span>`
       : `<span class="text-[9px] font-bold text-[#e87cb4] bg-pink-50 px-1.5 py-0.5 rounded-full">Recibido</span>`;
     const pts     = Number(r.points) || 0;
-    const ptsEl   = pts > 0 ? `<span class="text-[10px] font-semibold ${isSent ? 'text-[#3d2b56]' : 'text-[#e87cb4]'}">${isSent ? '-' : '+'}${pts} pts</span>` : '';
+    const ptsEl   = pts > 0 ? `<span class="text-[10px] font-semibold ${isSent ? 'text-[#3d2b56]' : 'text-[#e87cb4]'}">${isSent ? '-' : '+'}${pts} puntos</span>` : '';
     return `
     <div class="flex items-start gap-3 py-2.5 border-b border-gray-50 last:border-0">
       <div class="w-7 h-7 rounded-full ${getAvatarColor(other)} flex items-center justify-center text-white text-[10px] font-bold shrink-0">${esc((other[0]||'?').toUpperCase())}</div>
@@ -1993,6 +2166,7 @@ function toggleNotificationsDropdown(e) {
 function toggleNotifications(e) { toggleNotificationsDropdown(e); }
 
 function openNotificationsPage() {
+  closeAnalyticsPage();
   currentPage = 'notifications';
   const np = document.getElementById('notifications-page');
   np.style.display = '';
@@ -2122,6 +2296,9 @@ function updateProfileDisplay() {
   const avatar = document.getElementById('btn-profile')?.querySelector('div');
   if (avatar) avatar.textContent = initials;
 
+  const navAvatar = document.getElementById('profile-nav-avatar');
+  if (navAvatar) navAvatar.textContent = initials;
+
   const welcomeText = document.getElementById('welcome-text');
   if (welcomeText) welcomeText.textContent = `¡Hola, ${firstName}! 👋`;
   renderRecognitionBattery();
@@ -2142,6 +2319,27 @@ function updateProfileDisplay() {
   if (dCompany) dCompany.textContent = co?.name || 'N/A';
   const roleMap = { superadmin: 'Superadministrador', admin: 'Administrador de empresa', employee: 'Empleado' };
   if (dRole) dRole.textContent = roleMap[currentUser.role] || currentUser.role;
+
+  // Populate settings form with current user preferences
+  const visPublic  = document.getElementById('pref-cfg-vis-public');
+  const visPrivate = document.getElementById('pref-cfg-vis-private');
+  if (visPublic && visPrivate) {
+    const isPrivate = currentUser.recognition_visibility === 'private';
+    visPublic.checked  = !isPrivate;
+    visPrivate.checked = isPrivate;
+  }
+  const bdayToggle  = document.getElementById('pref-cfg-birthday');
+  const anivToggle  = document.getElementById('pref-cfg-anniversary');
+  if (bdayToggle)  bdayToggle.checked  = currentUser.auto_birthday  !== false;
+  if (anivToggle)  anivToggle.checked  = currentUser.auto_anniversary !== false;
+
+  // Clear password fields on open
+  const pwEl  = document.getElementById('cfg-new-password');
+  const pwEl2 = document.getElementById('cfg-confirm-password');
+  const pwErr = document.getElementById('cfg-pw-error');
+  if (pwEl)  pwEl.value  = '';
+  if (pwEl2) pwEl2.value = '';
+  if (pwErr) pwErr.classList.add('hidden');
 }
 
 // ------------------------------------------------------------
@@ -2425,8 +2623,8 @@ function _renderUpFeed() {
       : `<span class="text-[10px] font-bold uppercase tracking-wide text-[#e87cb4] bg-rosa-50 px-2 py-0.5 rounded-full">Recibido</span>`;
     const pointsBadge = points > 0
       ? isSent
-        ? `<span class="text-xs font-semibold text-[#3d2b56]">-${points} pts</span>`
-        : `<span class="text-xs font-semibold text-[#e87cb4]">+${points} pts</span>`
+        ? `<span class="text-xs font-semibold text-[#3d2b56]">-${points} puntos</span>`
+        : `<span class="text-xs font-semibold text-[#e87cb4]">+${points} puntos</span>`
       : '';
     const messageEl = msgText
       ? `<p class="text-xs text-gray-500 italic mt-1 leading-relaxed">"${esc(msgText)}"</p>`
@@ -2467,7 +2665,7 @@ function _renderUserProfile() {
   el('up-name').textContent    = u.name    || '—';
   el('up-role').textContent    = u.role    || '—';
   el('up-company').textContent = u.company || '—';
-  el('up-points').textContent  = (u.points_to_give ?? '–');
+  el('up-points').textContent  = (u.points_to_redeem ?? '–');
 
   const allRecs = window._allRecognitions || [];
   const userId  = u.__backendId;
@@ -2599,14 +2797,70 @@ function closeProfilePage() {
   document.getElementById('profile-dropdown').classList.add('hidden');
 }
 
-function saveSettings() {
-  const toast = document.createElement('div');
-  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-green-600 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 text-sm font-semibold';
-  toast.style.animation = 'scaleIn 0.3s ease';
-  toast.innerHTML = '<i data-lucide="check-circle" class="w-5 h-5"></i> <span>Cambios guardados correctamente ✓</span>';
-  document.body.appendChild(toast);
-  lucide.createIcons();
-  setTimeout(() => toast.remove(), 3000);
+async function saveSettings() {
+  const saveBtn = document.getElementById('cfg-save-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Guardando…'; }
+
+  try {
+    // Read preferences form
+    const visPublic  = document.getElementById('pref-cfg-vis-public');
+    const bdayToggle = document.getElementById('pref-cfg-birthday');
+    const anivToggle = document.getElementById('pref-cfg-anniversary');
+    const visibility     = visPublic?.checked ? 'public' : 'private';
+    const auto_birthday  = bdayToggle?.checked ?? true;
+    const auto_anniversary = anivToggle?.checked ?? true;
+
+    // Handle optional password change
+    const newPw  = (document.getElementById('cfg-new-password')?.value || '').trim();
+    const confPw = (document.getElementById('cfg-confirm-password')?.value || '').trim();
+    const pwErr  = document.getElementById('cfg-pw-error');
+
+    if (newPw || confPw) {
+      if (newPw.length < 8) {
+        if (pwErr) { pwErr.textContent = 'La contraseña debe tener al menos 8 caracteres.'; pwErr.classList.remove('hidden'); }
+        return;
+      }
+      if (newPw !== confPw) {
+        if (pwErr) { pwErr.textContent = 'Las contraseñas no coinciden.'; pwErr.classList.remove('hidden'); }
+        return;
+      }
+      if (pwErr) pwErr.classList.add('hidden');
+      const { error: pwError } = await window._sb.auth.updateUser({ password: newPw });
+      if (pwError) {
+        showErrorToast('No se pudo cambiar la contraseña: ' + pwError.message);
+        return;
+      }
+      document.getElementById('cfg-new-password').value  = '';
+      document.getElementById('cfg-confirm-password').value = '';
+    }
+
+    // Save preferences to DB
+    const { isOk } = await window.dataSdk.updatePreferences({ recognition_visibility: visibility, auto_birthday, auto_anniversary });
+    if (!isOk) {
+      showErrorToast('No se pudieron guardar las preferencias. Intentá de nuevo.');
+      return;
+    }
+
+    // Update in-memory user so UI stays in sync
+    currentUser.recognition_visibility = visibility;
+    currentUser.auto_birthday          = auto_birthday;
+    currentUser.auto_anniversary       = auto_anniversary;
+    const inAll = allUsers.find(u => u.__backendId === currentUser.__backendId);
+    if (inAll) {
+      inAll.recognition_visibility = visibility;
+      inAll.auto_birthday          = auto_birthday;
+      inAll.auto_anniversary       = auto_anniversary;
+    }
+
+    showSuccessToast('Cambios guardados correctamente ✓');
+    closeProfilePage();
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Guardar cambios';
+      lucide.createIcons({ nodes: [saveBtn] });
+    }
+  }
 }
 
 // Profile dropdown toggle
@@ -2651,6 +2905,7 @@ function updateAdminQuicknav() {
   document.getElementById('qnav-my-requests')?.classList.toggle('hidden', !isAdminOnly);
   document.getElementById('qnav-companies')?.classList.toggle('hidden', !isSA);
   document.getElementById('qnav-csv-requests')?.classList.toggle('hidden', !isSA);
+  document.getElementById('qnav-ar-companies')?.classList.toggle('hidden', !isSA);
 }
 
 function toggleArSection() {
@@ -2689,6 +2944,7 @@ async function renderAutoRecognitionsAdmin() {
   if (g('ar-anniversary-message'))  g('ar-anniversary-message').value   = s.anniversary_message || _AR_DEFAULTS.anniversary_message;
   if (g('ar-birthday-points'))      g('ar-birthday-points').value       = s.birthday_points    ?? 0;
   if (g('ar-anniversary-points'))   g('ar-anniversary-points').value    = s.anniversary_points ?? 0;
+  if (g('ar-send-email'))           g('ar-send-email').checked          = s.send_email_notification ?? false;
   // Populate hour select (0–23) and set saved values
   const hourSel = g('ar-send-hour');
   if (hourSel && !hourSel.options.length) {
@@ -2699,10 +2955,8 @@ async function renderAutoRecognitionsAdmin() {
       hourSel.appendChild(opt);
     }
   }
-  const [savedHour = '09', savedMin = '00'] = (s.send_time || '09:00').split(':');
+  const [savedHour = '09'] = (s.send_time || '09:00').split(':');
   if (hourSel) hourSel.value = savedHour;
-  const minSel = g('ar-send-minute');
-  if (minSel) minSel.value = ['00','15','30','45'].includes(savedMin) ? savedMin : '00';
 
   // Snapshot form state so we can detect real changes on save
   _arSnapshot = _arFormValues();
@@ -2718,6 +2972,238 @@ async function renderAutoRecognitionsAdmin() {
   _renderArMonth();
   lucide.createIcons();
 }
+
+// ── Superadmin: Auto-recognitions per company ────────────────────────────────
+
+let _saArSettings = {}; // { [companyId]: settingsObj }
+let _saArExpanded = null; // currently expanded companyId
+
+function openSuperadminArPage() {
+  if (currentUser?.role !== 'superadmin') return;
+  _saArExpanded = null;
+  const page = document.getElementById('superadmin-ar-page');
+  page.classList.remove('hidden');
+  _positionOverlayPage('superadmin-ar-page');
+  page.style.zIndex = '49'; // must be above admin-page (which also gets z-index 48)
+  if (_companiesData.length) {
+    renderSuperadminArSection();
+  } else {
+    loadCompanies().then(() => renderSuperadminArSection());
+  }
+  lucide.createIcons();
+}
+
+function closeSuperadminArPage() {
+  const page = document.getElementById('superadmin-ar-page');
+  page.classList.add('hidden');
+  page.style.display = 'none';
+}
+
+async function renderSuperadminArSection() {
+  const container = document.getElementById('sa-ar-list');
+  if (!container) return;
+
+  const realCompanies = _companiesData.length ? [..._companiesData] : [...companies];
+  if (!realCompanies.length) {
+    container.innerHTML = '<p class="text-center py-8 text-gray-400 text-sm">No hay empresas cargadas.</p>';
+    return;
+  }
+
+  // Load all settings in parallel
+  const results = await Promise.all(
+    realCompanies.map(c => window.autoRecognitionSdk.getSettings(c.id).then(r => ({ companyId: c.id, data: r.data })))
+  );
+  results.forEach(({ companyId, data }) => {
+    _saArSettings[companyId] = data || { company_id: companyId, ..._AR_DEFAULTS };
+  });
+
+  container.innerHTML = realCompanies.map(co => _renderSaArCompanyCard(co)).join('');
+  lucide.createIcons();
+}
+
+function _renderSaArCompanyCard(co) {
+  const s = _saArSettings[co.id] || { ..._AR_DEFAULTS };
+  const enabled   = s.enabled  ?? true;
+  const bdayOn    = s.birthday_enabled    ?? true;
+  const anivOn    = s.anniversary_enabled ?? true;
+  const emailOn   = s.send_email_notification ?? false;
+  const isOpen    = _saArExpanded === co.id;
+  const empCount = allUsers.filter(u => u.company_id === co.id).length;
+
+  const statusDot = enabled
+    ? '<span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span>'
+    : '<span class="w-2 h-2 rounded-full bg-gray-300 inline-block"></span>';
+
+  const hourOptions = Array.from({ length: 24 }, (_, h) => {
+    const v = String(h).padStart(2, '0');
+    const [savedH = '09'] = (s.send_time || '09:00').split(':');
+    return `<option value="${v}" ${v === savedH ? 'selected' : ''}>${v}</option>`;
+  }).join('');
+
+  return `
+    <div class="px-6 py-4">
+      <!-- Summary row -->
+      <div class="flex items-center gap-3 cursor-pointer" onclick="_toggleSaArCompany('${co.id}')">
+        <div class="w-8 h-8 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">
+          ${esc(co.name.substring(0,2).toUpperCase())}
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-bold text-gray-800 flex items-center gap-2">
+            ${esc(co.name)} ${statusDot}
+          </p>
+          <p class="text-xs text-gray-400">${empCount} empleado${empCount !== 1 ? 's' : ''} · ${bdayOn ? '🎂' : '🚫'} Cumpleaños · ${anivOn ? '🏢' : '🚫'} Aniversario</p>
+        </div>
+        <i data-lucide="chevron-down" class="w-4 h-4 text-gray-400 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180' : ''}"></i>
+      </div>
+
+      <!-- Expanded form -->
+      <div id="sa-ar-body-${co.id}" class="${isOpen ? '' : 'hidden'} mt-4 space-y-4 border-t border-gray-100 pt-4">
+
+        <!-- Master toggle -->
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold text-gray-700">Reconocimientos automáticos activos</span>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="sa-ar-enabled-${co.id}" class="sr-only peer" ${enabled ? 'checked' : ''}>
+            <div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-[#3d2b56]
+              after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+              after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all
+              peer-checked:after:translate-x-5"></div>
+          </label>
+        </div>
+
+        <!-- Two columns: Birthday | Anniversary -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          <!-- Birthday -->
+          <div class="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-bold text-gray-700 flex items-center gap-1.5">
+                <i data-lucide="cake" class="w-4 h-4 text-[#f19ac4]"></i> Cumpleaños
+              </span>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="sa-ar-bday-on-${co.id}" class="sr-only peer" ${bdayOn ? 'checked' : ''}>
+                <div class="w-9 h-5 bg-gray-200 rounded-full peer peer-checked:bg-[#f19ac4]
+                  after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                  after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all
+                  peer-checked:after:translate-x-4"></div>
+              </label>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-500 mb-1">Mensaje <span class="font-normal text-gray-400">— variables: {nombre}</span></label>
+              <textarea id="sa-ar-bday-msg-${co.id}" rows="3"
+                class="w-full text-sm bg-white border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none">${esc(s.birthday_message || _AR_DEFAULTS.birthday_message)}</textarea>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-500 mb-1">Puntos</label>
+              <input type="number" id="sa-ar-bday-pts-${co.id}" min="0" value="${s.birthday_points ?? 0}"
+                class="w-full text-sm bg-white border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300">
+            </div>
+          </div>
+
+          <!-- Anniversary -->
+          <div class="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-bold text-gray-700 flex items-center gap-1.5">
+                <i data-lucide="building-2" class="w-4 h-4 text-violet-400"></i> Aniversario
+              </span>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="sa-ar-aniv-on-${co.id}" class="sr-only peer" ${anivOn ? 'checked' : ''}>
+                <div class="w-9 h-5 bg-gray-200 rounded-full peer peer-checked:bg-violet-400
+                  after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                  after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all
+                  peer-checked:after:translate-x-4"></div>
+              </label>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-500 mb-1">Mensaje <span class="font-normal text-gray-400">— variables: {nombre} {años}</span></label>
+              <textarea id="sa-ar-aniv-msg-${co.id}" rows="3"
+                class="w-full text-sm bg-white border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none">${esc(s.anniversary_message || _AR_DEFAULTS.anniversary_message)}</textarea>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-500 mb-1">Puntos</label>
+              <input type="number" id="sa-ar-aniv-pts-${co.id}" min="0" value="${s.anniversary_points ?? 0}"
+                class="w-full text-sm bg-white border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300">
+            </div>
+          </div>
+        </div>
+
+        <!-- Send time -->
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-semibold text-gray-700 shrink-0">Hora de envío</span>
+          <select id="sa-ar-hour-${co.id}" class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">
+            ${hourOptions}
+          </select>
+          <span class="text-sm font-semibold text-gray-400">:00 hs</span>
+          <span class="text-xs text-gray-400">(UTC)</span>
+        </div>
+
+        <!-- Email notification -->
+        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100">
+          <div>
+            <p class="text-sm font-semibold text-gray-700 flex items-center gap-1.5"><i data-lucide="mail" class="w-4 h-4 text-[#3d2b56]"></i> Notificación por email</p>
+            <p class="text-xs text-gray-400 mt-0.5">Enviar email al empleado con el reconocimiento y link a la plataforma</p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
+            <input type="checkbox" id="sa-ar-email-${co.id}" class="sr-only peer" ${emailOn ? 'checked' : ''}>
+            <div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-[#3d2b56]
+              after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+              after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all
+              peer-checked:after:translate-x-5"></div>
+          </label>
+        </div>
+
+        <!-- Save button -->
+        <div class="flex justify-end">
+          <button id="sa-ar-save-btn-${co.id}" onclick="saveSuperadminArCompany('${co.id}')"
+            class="btn-recognize text-white px-5 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 shadow transition">
+            <i data-lucide="save" class="w-4 h-4"></i> Guardar cambios
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function _toggleSaArCompany(companyId) {
+  _saArExpanded = _saArExpanded === companyId ? null : companyId;
+  renderSuperadminArSection();
+}
+
+async function saveSuperadminArCompany(companyId) {
+  const btn = document.getElementById(`sa-ar-save-btn-${companyId}`);
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Guardando...'; lucide.createIcons({ nodes: [btn] }); }
+
+  const g = id => { const el = document.getElementById(id); return el; };
+  const hour = g(`sa-ar-hour-${companyId}`)?.value || '09';
+  const min  = '00';
+
+  const settings = {
+    company_id:           companyId,
+    enabled:              g(`sa-ar-enabled-${companyId}`)?.checked ?? true,
+    birthday_enabled:     g(`sa-ar-bday-on-${companyId}`)?.checked ?? true,
+    anniversary_enabled:  g(`sa-ar-aniv-on-${companyId}`)?.checked ?? true,
+    birthday_message:     g(`sa-ar-bday-msg-${companyId}`)?.value  || _AR_DEFAULTS.birthday_message,
+    anniversary_message:  g(`sa-ar-aniv-msg-${companyId}`)?.value  || _AR_DEFAULTS.anniversary_message,
+    birthday_points:      parseInt(g(`sa-ar-bday-pts-${companyId}`)?.value) || 0,
+    anniversary_points:   parseInt(g(`sa-ar-aniv-pts-${companyId}`)?.value) || 0,
+    send_time:                 `${hour}:${min}`,
+    send_email_notification:   g(`sa-ar-email-${companyId}`)?.checked ?? false,
+  };
+
+  const { isOk } = await window.autoRecognitionSdk.saveSettings(settings);
+
+  if (isOk) {
+    _saArSettings[companyId] = settings;
+    showSuccessToast(`Configuración de ${companies.find(c => c.id === companyId)?.name || companyId} guardada`);
+    // Re-render the card summary to reflect new state
+    renderSuperadminArSection();
+  } else {
+    showErrorToast('No se pudo guardar la configuración. Intentá de nuevo.');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save" class="w-4 h-4"></i> Guardar cambios'; lucide.createIcons({ nodes: [btn] }); }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function _populateArProgramSelect(selectId, currentValue) {
   const sel = document.getElementById(selectId);
@@ -2861,7 +3347,8 @@ function _arFormValues() {
     anniversary_message: (g('ar-anniversary-message')?.value?.trim() || _AR_DEFAULTS.anniversary_message),
     birthday_points:     String(parseInt(g('ar-birthday-points')?.value  || '0')),
     anniversary_points:  String(parseInt(g('ar-anniversary-points')?.value || '0')),
-    send_time:           `${g('ar-send-hour')?.value || '09'}:${g('ar-send-minute')?.value || '00'}`,
+    send_time:                `${g('ar-send-hour')?.value || '09'}:00`,
+    send_email_notification:  String(g('ar-send-email')?.checked ?? false),
   };
 }
 
@@ -2902,7 +3389,8 @@ async function saveAutoRecognitionSettings() {
     anniversary_program: '🎉 Aniversario',
     birthday_points:     parseInt(g('ar-birthday-points')?.value  || '0'),
     anniversary_points:  parseInt(g('ar-anniversary-points')?.value || '0'),
-    send_time:           `${g('ar-send-hour')?.value || '09'}:${g('ar-send-minute')?.value || '00'}`,
+    send_time:                `${g('ar-send-hour')?.value || '09'}:00`,
+    send_email_notification:  g('ar-send-email')?.checked ?? false,
   };
 
   const saveBtn = document.querySelector('[onclick="saveAutoRecognitionSettings()"]');
@@ -3049,19 +3537,29 @@ function renderCompaniesList() {
     return;
   }
 
-  const rows = paged.map(c => `
+  const rows = paged.map(c => {
+    const storeOn = c.store_enabled !== false;
+    const empCount = allUsers.filter(u => u.company_id === c.id && u.role !== 'superadmin').length;
+    return `
     <div class="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-gray-200 bg-gray-50">
       <div class="w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center shrink-0">
         <i data-lucide="building-2" class="w-4 h-4 text-violet-500"></i>
       </div>
       <div class="flex-1 min-w-0">
         <p class="text-sm font-semibold text-gray-800">${esc(c.name)}</p>
-        <p class="text-xs text-gray-400"><span class="font-mono bg-gray-100 px-1 rounded">${esc(c.id)}</span> &nbsp;·&nbsp; ${esc(c.domain)}</p>
+        <p class="text-xs text-gray-400"><span class="font-mono bg-gray-100 px-1 rounded">${esc(c.id)}</span> &nbsp;·&nbsp; ${esc(c.domain)} &nbsp;·&nbsp; <i data-lucide="users" class="w-3 h-3 inline-block -mt-0.5"></i> ${empCount} empleado${empCount !== 1 ? 's' : ''}</p>
       </div>
+      <button onclick="toggleCompanyStore('${esc(c.id)}', ${!storeOn})"
+        title="${storeOn ? 'Desactivar tienda y puntos' : 'Activar tienda y puntos'}"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition shrink-0 ${storeOn ? 'bg-green-50 text-green-600 hover:bg-green-100 border border-green-200' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 border border-gray-200'}">
+        <i data-lucide="${storeOn ? 'shopping-bag' : 'shopping-bag-x'}" class="w-3.5 h-3.5"></i>
+        ${storeOn ? 'Tienda ON' : 'Tienda OFF'}
+      </button>
       <button onclick="deleteCompany('${esc(c.id)}')" class="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition" title="Eliminar empresa">
         <i data-lucide="trash-2" class="w-4 h-4"></i>
       </button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   const pagination = totalPages > 1 ? `
     <div class="flex items-center justify-between pt-3 border-t border-gray-100 mt-2">
@@ -3076,6 +3574,15 @@ function renderCompaniesList() {
 
   container.innerHTML = rows + pagination;
   lucide.createIcons();
+}
+
+async function toggleCompanyStore(companyId, enable) {
+  const { isOk } = await window.companySdk.update(companyId, { store_enabled: enable });
+  if (!isOk) { showErrorToast('No se pudo actualizar la configuración'); return; }
+  const idx = _companiesData.findIndex(c => c.id === companyId);
+  if (idx !== -1) _companiesData[idx].store_enabled = enable;
+  renderCompaniesList();
+  showSuccessToast(enable ? `Tienda activada para ${_companiesData[idx]?.name || companyId}` : `Tienda desactivada para ${_companiesData[idx]?.name || companyId}`);
 }
 
 function toggleCreateCompanyForm() {
@@ -3185,6 +3692,7 @@ function impersonateEmployee(empBackendId) {
 
   updateProfileDisplay();
   updatePointsDisplay();
+  loadCurrentCompanySettings();
 
   filterEmployeesByCompany();
   renderEmployeesList();
@@ -3196,6 +3704,7 @@ function impersonateEmployee(empBackendId) {
   loadNotifications();
   _loadApprovals();
   _setupFeedRealtime();
+  _setupCommentsRealtime();
   renderRecognitionBattery();
   lucide.createIcons();
 }
@@ -3220,6 +3729,8 @@ function returnToSuperadmin() {
   originalSuperadminUser = null;
   isImpersonating = false;
   document.body.classList.add('is-superadmin');
+  _storeEnabled = true;
+  _applyStoreMode();
   filterEmployeesByCompany();
   renderEmployeesList();
   updateImpersonationBanner();
@@ -3767,12 +4278,8 @@ async function sendRecognition() {
       }
     }
 
-    const notifRecipients = _selectedRecipients
-      .filter(r => allUsers.find(u => u.__backendId === r.id))
-      .map(r => ({ user_id: r.id, name: r.name }));
-    window.notificationSdk.sendRecognitionNotifications(
-      notifRecipients, currentUser.__backendId, points, selectedProgram
-    ).catch(e => _log('notification send error:', e));
+    // NOTE: recognition notifications are created by the DB RPC (send_recognition_as).
+    // Do NOT call sendRecognitionNotifications here — it would create a duplicate.
 
     await window.dataSdk.refresh();
     updateAllPointsDisplays();
@@ -3784,7 +4291,7 @@ async function sendRecognition() {
     renderRecognitionBattery();
     const plural = sentCount > 1 ? `a ${sentCount} personas` : `a ${_selectedRecipients[0]?.name}`;
     const successMsg = (usingBudget && selectedProg?.custom)
-      ? `¡Reconocimiento enviado ${plural}! -${points * sentCount} pts del programa`
+      ? `¡Reconocimiento enviado ${plural}! -${points * sentCount} puntos del programa`
       : `¡Reconocimiento enviado ${plural}!`;
     showSuccessToast(successMsg);
   } catch (err) {
@@ -4087,7 +4594,19 @@ async function addComment(btn) {
     }
     const fullMessage = [text, remoteImgUrl].filter(Boolean).join('\n');
     if (fullMessage) {
-      const { data } = await window.recognitionSdk.addComment(recognitionId, currentUser.__backendId, fullMessage);
+      const { isOk, data } = await window.recognitionSdk.addComment(recognitionId, currentUser.__backendId, fullMessage);
+      if (!isOk) {
+        // Save failed — roll back the optimistic comment and tell the user
+        newComment.remove();
+        const countSpan = card.querySelector('.comment-count');
+        if (countSpan) countSpan.textContent = Math.max(0, (parseInt(countSpan.textContent) || 1) - 1);
+        const allCRollback = JSON.parse(card.dataset.allComments || '[]');
+        allCRollback.pop();
+        card.dataset.allComments = JSON.stringify(allCRollback);
+        card.dataset.shownComments = Math.max(0, (parseInt(card.dataset.shownComments || '1') || 1) - 1);
+        showErrorToast('No se pudo guardar el comentario. Intentá de nuevo.');
+        return;
+      }
       if (data?.id) {
         newComment.dataset.commentId = data.id;
         const delBtn = newComment.querySelector('button[onclick*="deleteComment"]');
@@ -4129,17 +4648,39 @@ async function addComment(btn) {
   const preview = card.querySelector('.comment-img-preview');
   if (preview) { preview.innerHTML = ''; preview.classList.add('hidden'); }
 
-  const mainEl = document.querySelector('main');
-  if (mainEl) setTimeout(() => {
+  const scrollEl = card.closest('.overflow-y-auto') || document.querySelector('main');
+  if (scrollEl) setTimeout(() => {
     const cardRect = card.getBoundingClientRect();
-    const mainRect = mainEl.getBoundingClientRect();
-    if (cardRect.bottom > mainRect.bottom) {
-      mainEl.scrollBy({ top: cardRect.bottom - mainRect.bottom + 16, behavior: 'smooth' });
+    const scrollRect = scrollEl.getBoundingClientRect();
+    if (cardRect.bottom > scrollRect.bottom) {
+      scrollEl.scrollBy({ top: cardRect.bottom - scrollRect.bottom + 16, behavior: 'smooth' });
     }
   }, 50);
 
   const countSpan = card.querySelector('.comment-count');
   if (countSpan) countSpan.textContent = (parseInt(countSpan.textContent) || 0) + 1;
+
+  // Sync all other cards in the DOM that show the same recognition
+  const recId = card.dataset.recognitionId;
+  if (recId) {
+    document.querySelectorAll(`article[data-recognition-id="${recId}"]`).forEach(otherCard => {
+      if (otherCard === card) return;
+      const otherCount = otherCard.querySelector('.comment-count');
+      if (otherCount) otherCount.textContent = (parseInt(otherCount.textContent) || 0) + 1;
+      // Mirror the new comment into the other card's comments list
+      const otherSection = otherCard.querySelector('.comments-section');
+      if (otherSection) {
+        let otherList = otherCard.querySelector('.comments-list');
+        if (!otherList) {
+          otherList = document.createElement('div');
+          otherList.className = 'px-4 pt-3 pb-1 space-y-3 comments-list';
+          otherSection.before(otherList);
+        }
+        otherList.appendChild(newComment.cloneNode(true));
+      }
+    });
+  }
+
   lucide.createIcons();
 }
 
@@ -4255,9 +4796,10 @@ window.elementSdk.init({
 // ------------------------------------------------------------
 const FEED_LIMIT = 10;
 
-let _feedRealtimeChannel  = null;
-let _feedRefreshTimer     = null;
-let _feedRealtimeSetupId  = 0; // increments on each setup call, cancels stale ones
+let _feedRealtimeChannel     = null;
+let _feedRefreshTimer        = null;
+let _feedRealtimeSetupId     = 0;
+let _commentsRealtimeChannel = null;
 
 function _debouncedFeedRefresh() {
   clearTimeout(_feedRefreshTimer);
@@ -4288,6 +4830,78 @@ function _setupFeedRealtime() {
     : currentUser?.company_id;
 
   _feedRealtimeChannel = window.recognitionSdk.subscribeToNew(companyId, _debouncedFeedRefresh);
+}
+
+function _setupCommentsRealtime() {
+  if (_commentsRealtimeChannel) {
+    window.recognitionSdk.unsubscribeChannel(_commentsRealtimeChannel);
+    _commentsRealtimeChannel = null;
+  }
+  _commentsRealtimeChannel = window.recognitionSdk.subscribeToComments(_handleRealtimeComment);
+}
+
+function _handleRealtimeComment(payload) {
+  const c = payload.new;
+  if (!c) return;
+  // Skip own comments — already shown via the optimistic update in addComment()
+  if (c.user_id === currentUser?.__backendId) return;
+
+  const author = allUsers.find(u => u.__backendId === c.user_id);
+  const commentObj = {
+    id: c.id,
+    message: c.message,
+    created_at: c.created_at,
+    user: { id: c.user_id, name: author?.name || 'Usuario' },
+  };
+
+  // Update every rendered card that matches (feed + modal)
+  document.querySelectorAll(`[data-recognition-id="${c.recognition_id}"]`).forEach(card => {
+    _appendCommentToCard(card, commentObj);
+  });
+}
+
+function _appendCommentToCard(card, c) {
+  const { text: msgText, imgs } = parseCommentMessage(c.message);
+  const imgHtml = imgs.map(u => `<img src="${esc(u)}" class="mt-1.5 rounded-lg max-w-full max-h-40 object-cover border border-gray-100">`).join('');
+  const ci = esc((c.user?.name || '?').split(' ').map(n => n[0]).join('').substring(0, 1).toUpperCase());
+  const isOwner = c.user?.id && currentUser?.__backendId && c.user.id === currentUser.__backendId;
+
+  let container = card.querySelector('.comments-list');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'px-4 pt-3 pb-1 space-y-3 comments-list';
+    const section = card.querySelector('.comments-section');
+    if (section) section.before(container);
+    else card.appendChild(container);
+  }
+
+  const div = document.createElement('div');
+  div.className = 'flex items-start gap-2.5';
+  if (c.id) div.dataset.commentId = c.id;
+  div.innerHTML = `
+    <div class="w-7 h-7 rounded-full bg-[#3d2b56] flex items-center justify-center text-white text-xs font-bold shrink-0">${ci}</div>
+    <div class="bg-gray-50 rounded-xl px-3 py-2 flex-1">
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-xs font-semibold text-gray-700">${esc(c.user?.name || 'Usuario')}</p>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <span class="text-[10px] text-gray-400">${c.created_at ? formatTimeAgo(c.created_at) : 'Ahora'}</span>
+          ${isOwner && c.id ? `<button onclick="deleteComment('${esc(c.id)}',this)" class="text-gray-300 hover:text-red-400 transition" title="Eliminar comentario"><i data-lucide="x" class="w-3 h-3"></i></button>` : ''}
+        </div>
+      </div>
+      ${msgText ? `<p class="text-xs text-gray-600 mt-0.5">${esc(msgText)}</p>` : ''}
+      ${imgHtml}
+    </div>`;
+  container.appendChild(div);
+
+  const allC = JSON.parse(card.dataset.allComments || '[]');
+  allC.push(c);
+  card.dataset.allComments = JSON.stringify(allC);
+  card.dataset.shownComments = (parseInt(card.dataset.shownComments || '0') || 0) + 1;
+
+  const countSpan = card.querySelector('.comment-count');
+  if (countSpan) countSpan.textContent = (parseInt(countSpan.textContent) || 0) + 1;
+
+  if (window.lucide) lucide.createIcons({ nodes: [div] });
 }
 
 const PROGRAM_COLORS = {
@@ -4333,7 +4947,18 @@ function _canViewRecognition(rec) {
 }
 
 function buildFeedCard(rec) {
-  const senderName     = rec.from_user?.name || rec.from_user_name || 'Desconocido';
+  const fromUserProfile = allUsers.find(u => u.__backendId === rec.from_user?.id);
+  const isAutoRec = fromUserProfile
+    && ['admin', 'superadmin'].includes(fromUserProfile.role)
+    && (rec.program?.startsWith('🎂') || rec.program?.startsWith('🎉'));
+  let senderName;
+  if (isAutoRec && rec.company_id) {
+    const co = (_companiesData || []).find(c => c.id === rec.company_id)
+            || companies.find(c => c.id === rec.company_id);
+    senderName = co?.name || rec.from_user?.name || 'Desconocido';
+  } else {
+    senderName = rec.from_user?.name || rec.from_user_name || 'Desconocido';
+  }
   const senderInactive = !rec.from_user && !!rec.from_user_name;
   const initials       = esc(senderName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2));
   const avatarColor    = rec.from_user ? AVATAR_COLORS[senderName.length % AVATAR_COLORS.length] : 'bg-gray-300';
@@ -4414,7 +5039,7 @@ function buildFeedCard(rec) {
     : '';
 
   const pointsBadgeHtml2 = rec.points > 0
-    ? `<span class="points-badge ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${Number(rec.points)} pts</span>`
+    ? `<span class="points-badge ${gradient} text-white text-xs font-bold px-2.5 py-1 rounded-full">+${Number(rec.points)} puntos</span>`
     : '';
 
   const { text: msgText, imgs: msgImgs } = parseCommentMessage(cleanMessage);
@@ -4627,13 +5252,13 @@ function renderNotificationsDropdown() {
     let icon, iconColor, text;
     if (n.type === 'recognition') {
       icon = 'heart'; iconColor = 'rose';
-      text = `<span class="font-semibold">${esc(fromName)}</span> te reconoció (+${Number(n.data?.points)} pts)`;
+      text = `<span class="font-semibold">${esc(fromName)}</span> te reconoció (+${Number(n.data?.points)} puntos)`;
     } else if (n.type === 'reaction') {
       icon = 'smile'; iconColor = 'violet';
       text = `<span class="font-semibold">${esc(fromName)}</span> reaccionó ${esc(n.data?.emoji)} a tu reconocimiento`;
     } else if (n.type === 'program_approval_request') {
       icon = 'check-square'; iconColor = 'amber';
-      text = `${n.data?.program_emoji || '🏆'} <span class="font-semibold">${esc(n.data?.requester_name)}</span> solicita aprobación para <strong>${esc(n.data?.program_name)}</strong> (${Number(n.data?.points)} pts)`;
+      text = `${n.data?.program_emoji || '🏆'} <span class="font-semibold">${esc(n.data?.requester_name)}</span> solicita aprobación para <strong>${esc(n.data?.program_name)}</strong> (${Number(n.data?.points)} puntos)`;
     } else if (n.type === 'program_approved') {
       icon = 'check-circle'; iconColor = 'green';
       text = `${n.data?.program_emoji || '🏆'} Tu programa <strong>${esc(n.data?.program_name)}</strong> fue aprobado por <span class="font-semibold">${esc(n.data?.approved_by)}</span>`;
@@ -4645,13 +5270,13 @@ function renderNotificationsDropdown() {
       text = `El programa <strong>${esc(n.data?.program_name)}</strong> fue eliminado por <span class="font-semibold">${esc(n.data?.deleted_by)}</span>. Motivo: "${esc(n.data?.reason)}"${n.data?.refund_note ? ` <span class="text-green-600">${esc(n.data.refund_note)}</span>` : ''}`;
     } else if (n.type === 'points_purchase_request') {
       icon = 'coins'; iconColor = 'violet';
-      text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó comprar <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> para ${esc(n.data?.company_name || n.data?.company_id || 'su empresa')}`;
+      text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó comprar <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> para ${esc(n.data?.company_name || n.data?.company_id || 'su empresa')}`;
     } else if (n.type === 'points_purchase_approved') {
       icon = 'check-circle'; iconColor = 'green';
-      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> fue aprobada`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue aprobada`;
     } else if (n.type === 'points_purchase_rejected') {
       icon = 'x-circle'; iconColor = 'red';
-      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> fue rechazada`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue rechazada`;
     } else if (n.type === 'csv_request') {
       icon = 'file-up'; iconColor = 'amber';
       text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó cargar <strong>${n.data?.row_count || '?'} empleados</strong> (${esc(n.data?.file_name || 'CSV')})`;
@@ -4693,13 +5318,13 @@ function renderNotificationsPage() {
     let avatarContent, text;
     if (n.type === 'recognition') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${esc((fromName[0] || '?').toUpperCase())}</div>`;
-      text = `<span class="font-semibold">${esc(fromName)}</span> te reconoció con <strong>+${Number(n.data?.points)} pts</strong> · ${esc(n.data?.program)}`;
+      text = `<span class="font-semibold">${esc(fromName)}</span> te reconoció con <strong>+${Number(n.data?.points)} puntos</strong> · ${esc(n.data?.program)}`;
     } else if (n.type === 'reaction') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${esc((fromName[0] || '?').toUpperCase())}</div>`;
       text = `<span class="font-semibold">${esc(fromName)}</span> reaccionó ${esc(n.data?.emoji)} a tu reconocimiento`;
     } else if (n.type === 'program_approval_request') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0"><i data-lucide="check-square" class="w-5 h-5 text-amber-500"></i></div>`;
-      text = `${n.data?.program_emoji || '🏆'} <span class="font-semibold">${esc(n.data?.requester_name)}</span> solicita aprobación para el ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${esc(n.data?.program_name)}</strong> · ${Number(n.data?.points)} pts`;
+      text = `${n.data?.program_emoji || '🏆'} <span class="font-semibold">${esc(n.data?.requester_name)}</span> solicita aprobación para el ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${esc(n.data?.program_name)}</strong> · ${Number(n.data?.points)} puntos`;
     } else if (n.type === 'program_approved') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0"><i data-lucide="check-circle" class="w-5 h-5 text-green-500"></i></div>`;
       text = `${n.data?.program_emoji || '🏆'} Tu ${n.data?.is_recharge ? 'recarga del' : 'nuevo'} programa <strong>${esc(n.data?.program_name)}</strong> fue aprobado por <span class="font-semibold">${esc(n.data?.approved_by)}</span>`;
@@ -4711,13 +5336,13 @@ function renderNotificationsPage() {
       text = `El programa <strong>${esc(n.data?.program_name)}</strong> fue eliminado por <span class="font-semibold">${esc(n.data?.deleted_by)}</span>.<br><span class="text-gray-500">Motivo: "${esc(n.data?.reason)}"</span>${n.data?.refund_note ? `<br><span class="text-green-600 text-xs">${esc(n.data.refund_note)}</span>` : ''}`;
     } else if (n.type === 'points_purchase_request') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center shrink-0"><i data-lucide="coins" class="w-5 h-5 text-violet-500"></i></div>`;
-      text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó comprar <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> para <strong>${esc(n.data?.company_name || n.data?.company_id || 'su empresa')}</strong>`;
+      text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó comprar <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> para <strong>${esc(n.data?.company_name || n.data?.company_id || 'su empresa')}</strong>`;
     } else if (n.type === 'points_purchase_approved') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0"><i data-lucide="check-circle" class="w-5 h-5 text-green-500"></i></div>`;
-      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> fue aprobada. Los puntos se acreditarán a la brevedad.`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue aprobada. Los puntos se acreditarán a la brevedad.`;
     } else if (n.type === 'points_purchase_rejected') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="x-circle" class="w-5 h-5 text-red-500"></i></div>`;
-      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} pts</strong> fue rechazada.`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue rechazada.`;
     } else if (n.type === 'csv_request') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0"><i data-lucide="file-up" class="w-5 h-5 text-amber-500"></i></div>`;
       text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó cargar <strong>${n.data?.row_count || '?'} empleados</strong> · ${esc(n.data?.file_name || 'CSV')} · ${esc(n.data?.company_id || '')}`;
@@ -4754,12 +5379,21 @@ function renderNotificationsPage() {
 }
 
 function closeRecognitionModal() {
-  document.getElementById('recognition-detail-modal').classList.add('hidden');
+  const modal = document.getElementById('recognition-detail-modal');
+  modal.classList.add('hidden');
+  delete modal.dataset.currentRecognitionId;
 }
 
 async function openRecognitionModal(recognitionId) {
   const modal = document.getElementById('recognition-detail-modal');
   const content = document.getElementById('recognition-detail-content');
+
+  // If already showing this exact recognition, just ensure it's visible — don't wipe & re-fetch
+  if (!modal.classList.contains('hidden') && modal.dataset.currentRecognitionId === String(recognitionId)) {
+    return;
+  }
+
+  modal.dataset.currentRecognitionId = String(recognitionId);
   content.innerHTML = `<div class="bg-white rounded-2xl p-8 flex items-center justify-center"><i data-lucide="loader-2" class="w-6 h-6 text-violet-400 animate-spin"></i></div>`;
   modal.classList.remove('hidden');
   lucide.createIcons();
@@ -4835,13 +5469,13 @@ async function openStore() {
   _positionOverlayPage('store-page');
   if (currentUser) {
     const pts = currentUser.points_to_redeem || 0;
-    document.getElementById('store-points-display').textContent = `${pts} pts`;
+    document.getElementById('store-points-display').textContent = `${pts} puntos`;
     document.getElementById('store-hero-block').innerHTML = `
       <div class="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-5">
         <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Tus puntos disponibles</p>
         <div class="flex items-baseline gap-2 mb-1">
           <span id="store-hero-points" class="text-5xl font-black text-gray-900">${pts}</span>
-          <span class="text-lg font-bold text-violet-500">pts</span>
+          <span class="text-lg font-bold text-violet-500">puntos</span>
         </div>
         <p class="text-sm text-gray-400 mt-1">Elegí cómo disfrutar tu reconocimiento.</p>
       </div>`;
@@ -4857,7 +5491,7 @@ function _updateStoreHeaderPoints() {
   if (!currentUser) return;
   const pts = currentUser.points_to_redeem || 0;
   const headerEl = document.getElementById('store-points-display');
-  if (headerEl) headerEl.textContent = `${pts} pts`;
+  if (headerEl) headerEl.textContent = `${pts} puntos`;
   const heroEl = document.getElementById('store-hero-points');
   if (heroEl) heroEl.textContent = pts;
 }
@@ -4868,7 +5502,7 @@ async function renderStore() {
   container.innerHTML = '<div class="text-center py-10"><i data-lucide="loader" class="w-8 h-8 animate-spin text-violet-400 mx-auto"></i></div>';
   lucide.createIcons();
 
-  const isSuperadmin = currentUser.role === 'superadmin';
+  const isSuperadmin = currentUser.role === 'superadmin' && !isImpersonating;
   const { isOk, data } = isSuperadmin
     ? await window.rewardSdk.listAll()
     : await window.rewardSdk.list(currentUser.company_id);
@@ -4961,7 +5595,18 @@ async function renderStore() {
       Vista de administración: gestioná el stock de cada producto y mirá cuántos pedidos tuvo.
     </div>` : '';
 
-  container.innerHTML = adminBannerHtml + catBarHtml + sectionsHtml;
+  const _isAdmin = currentUser?.role === 'admin' || (currentUser?.role === 'superadmin' && isImpersonating);
+  const lockedBannerHtml = !_storeEnabled ? `
+    <div class="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 mb-5 flex items-start gap-3">
+      <i data-lucide="lock" class="w-5 h-5 text-amber-500 shrink-0 mt-0.5"></i>
+      <div>
+        <p class="text-sm font-semibold text-amber-800">La tienda de beneficios no está disponible aún</p>
+        ${_isAdmin ? `<p class="text-xs text-amber-600 mt-1">Contactá a tu ejecutivo de Allay para activarla y comenzar a canjear tus puntos.</p>` : ''}
+      </div>
+    </div>` : '';
+
+  container.innerHTML = lockedBannerHtml + adminBannerHtml + catBarHtml + sectionsHtml;
+  lucide.createIcons();
 }
 
 // Genera una imagen genérica (SVG) para usar como placeholder hasta que se suba una foto real
@@ -4994,6 +5639,20 @@ function buildStoreRewardCard(r, userPts, isPlaceholder, cat) {
   const outOfStock = !isPlaceholder && r.stock !== null && r.stock !== undefined && r.stock <= 0;
   const canRedeem  = !isPlaceholder && !outOfStock && canAfford;
 
+  if (!_storeEnabled) {
+    return `<div class="bg-white rounded-xl border border-gray-100 p-5 flex flex-col gap-3 relative grayscale opacity-60 select-none">
+      <img src="${imgSrc}" alt="${name}" class="w-full h-28 object-cover rounded-lg bg-gray-100">
+      <div>
+        <h4 class="font-bold text-gray-400 text-sm leading-snug">${name}</h4>
+        <p class="text-xs text-gray-300 mt-1.5 leading-relaxed line-clamp-2">${esc(desc)}</p>
+      </div>
+      <div class="mt-auto pt-3 border-t border-gray-50 flex items-center justify-between">
+        <div class="h-4 w-16 bg-gray-200 rounded-full"></div>
+        <div class="px-4 py-1.5 rounded-full text-xs font-bold bg-gray-100 text-gray-300 cursor-not-allowed">Bloqueado</div>
+      </div>
+    </div>`;
+  }
+
   return `<div class="bg-white rounded-xl border border-gray-100 p-5 flex flex-col gap-3 hover:shadow-md transition relative">
     ${badge ? `<span class="absolute top-4 right-4 text-[10px] font-bold bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full z-10">${badge}</span>` : ''}
     <img src="${imgSrc}" alt="${name}" class="w-full h-28 object-cover rounded-lg bg-gray-50">
@@ -5005,10 +5664,10 @@ function buildStoreRewardCard(r, userPts, isPlaceholder, cat) {
       <div>
         <div class="flex items-baseline gap-1">
           <span class="font-black text-violet-600 text-lg">${cost}</span>
-          <span class="text-xs text-gray-400">pts</span>
+          <span class="text-xs text-gray-400">puntos</span>
         </div>
         ${!isPlaceholder && outOfStock ? `<p class="text-[10px] text-pink-500 font-medium mt-0.5">Sin stock</p>` : ''}
-        ${!isPlaceholder && !outOfStock && !canAfford  ? `<p class="text-[10px] text-pink-500 font-medium mt-0.5">Te faltan ${missing} pts</p>` : ''}
+        ${!isPlaceholder && !outOfStock && !canAfford  ? `<p class="text-[10px] text-pink-500 font-medium mt-0.5">Te faltan ${missing} puntos</p>` : ''}
         ${!isPlaceholder && !outOfStock &&  canAfford  ? `<p class="text-[10px] text-emerald-500 font-medium mt-0.5">Podés canjear esto ✓</p>` : ''}
       </div>
       <button ${canRedeem ? `onclick="redeemReward('${id}', '${name}', ${cost})"` : 'disabled'}
@@ -5043,7 +5702,7 @@ function buildSuperadminRewardCard(r, redemptionCount, cat) {
     <div class="flex items-center justify-between mt-auto pt-3 border-t border-gray-50 text-xs">
       <div>
         <span class="font-black text-violet-600 text-lg">${cost}</span>
-        <span class="text-gray-400">pts</span>
+        <span class="text-gray-400">puntos</span>
       </div>
       <div class="text-right text-gray-500">
         <p>Pedidos: <span class="font-bold text-gray-800">${redemptionCount}</span></p>
@@ -5137,18 +5796,18 @@ async function redeemReward(rewardId, name, cost) {
   updateAllPointsDisplays();
   _updateStoreHeaderPoints();
   await renderStore();
-  showSuccessToast(`¡Canjeaste ${name}! -${cost} pts`);
+  showSuccessToast(`¡Canjeaste ${name}! -${cost} puntos`);
 }
 
 const DEFAULT_PROGRAMS = [
-  { id: 'p1', emoji: '🏆', name: 'Trabajo en Equipo',        active: true, global: true },
-  { id: 'p2', emoji: '🎯', name: 'Liderazgo',                active: true, global: true },
-  { id: 'p3', emoji: '💡', name: 'Innovación',               active: true, global: true },
-  { id: 'p4', emoji: '🤝', name: 'Colaboración',             active: true, global: true },
-  { id: 'p5', emoji: '⭐', name: 'Actitud',                  active: true, global: true },
-  { id: 'p6', emoji: '✅', name: 'Cumplimiento de objetivos', active: true, global: true },
-  { id: 'global-birthday',    emoji: '🎂', name: 'Cumpleaños',  active: true, global: true },
-  { id: 'global-anniversary', emoji: '🎉', name: 'Aniversario', active: true, global: true },
+  { id: 'p1', emoji: '🏆', name: 'Trabajo en Equipo',        active: true, global: true, description: 'Para cuando alguien hizo que el equipo funcionara mejor juntos. Ideal si la persona puso al grupo por delante, mantuvo la cohesión en momentos difíciles o fue el ancla que todos necesitaban.' },
+  { id: 'p2', emoji: '🎯', name: 'Liderazgo',                active: true, global: true, description: 'Para quien tomó las riendas sin que nadie se lo pidiera. Úsalo cuando alguien guió al equipo, tomó decisiones difíciles o inspiró a otros a dar lo mejor de sí.' },
+  { id: 'p3', emoji: '💡', name: 'Innovación',               active: true, global: true, description: 'Para la idea que nadie había pensado, la solución creativa o la forma diferente de hacer algo. Si el reconocimiento es por pensar fuera del molde, este es el programa.' },
+  { id: 'p4', emoji: '🤝', name: 'Colaboración',             active: true, global: true, description: 'Para quien cruzó fronteras: ayudó a otro equipo, sumó sin que fuera su responsabilidad o hizo que dos áreas trabajaran mejor juntas. Si el aporte fue más allá de su rol, elegí este.' },
+  { id: 'p5', emoji: '⭐', name: 'Actitud',                  active: true, global: true, description: 'Para el que contagia energía positiva, mantiene el ánimo alto cuando todo es difícil o hace que trabajar sea un poco mejor cada día. A veces el mayor aporte no es técnico, es humano.' },
+  { id: 'p6', emoji: '✅', name: 'Cumplimiento de objetivos', active: true, global: true, description: 'Para cuando alguien entregó lo que prometió, cumplió un hito importante o cerró algo que el equipo venía persiguiendo. Resultados concretos que merecen ser celebrados.' },
+  { id: 'global-birthday',    emoji: '🎂', name: 'Cumpleaños',  active: true, global: true, description: 'Hoy es su día. Aprovechá para decirle algo genuino más allá del "feliz cumple" — contale qué valorás de tenerlo en el equipo.' },
+  { id: 'global-anniversary', emoji: '🎉', name: 'Aniversario', active: true, global: true, description: 'Un nuevo año junto al equipo merece más que un silencio. Contale qué cambió desde que llegó y por qué importa que siga estando.' },
 ];
 
 let companyPrograms = [...DEFAULT_PROGRAMS];
@@ -5516,7 +6175,7 @@ function renderApprovalsQueue() {
     if (pd.description) detailRows.push(`<div class="flex items-start gap-2"><span class="text-xs text-gray-400 w-24 shrink-0">Descripción</span><span class="text-xs text-gray-700">${esc(pd.description)}</span></div>`);
     if (empNames.length) detailRows.push(`<div class="flex items-start gap-2"><span class="text-xs text-gray-400 w-24 shrink-0">Participantes</span><span class="text-xs text-gray-700">${empNames.join(', ')}</span></div>`);
     else if (employees.length === 0 && !pd.global) detailRows.push(`<div class="flex items-center gap-2"><span class="text-xs text-gray-400 w-24 shrink-0">Participantes</span><span class="text-xs text-gray-500 italic">Todos los empleados</span></div>`);
-    if (req.points)     detailRows.push(`<div class="flex items-center gap-2"><span class="text-xs text-gray-400 w-24 shrink-0">Budget</span><span class="text-xs font-semibold text-violet-700">${req.points} pts</span></div>`);
+    if (req.points)     detailRows.push(`<div class="flex items-center gap-2"><span class="text-xs text-gray-400 w-24 shrink-0">Budget</span><span class="text-xs font-semibold text-violet-700">${req.points} puntos</span></div>`);
 
     return `
     <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hover:shadow-md transition" data-req-id="${req.id}">
@@ -5540,7 +6199,7 @@ function renderApprovalsQueue() {
               ${req.fundingSource === 'self' ? `<span class="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">puntos del usuario</span>` : ''}
               <div class="flex items-center gap-1 bg-white border border-violet-100 rounded-xl px-3 py-1.5">
                 <i data-lucide="coins" class="w-4 h-4 text-violet-500"></i>
-                <span class="text-sm font-bold text-violet-700">${req.points} pts</span>
+                <span class="text-sm font-bold text-violet-700">${req.points} puntos</span>
               </div>
               <i data-lucide="chevron-down" class="w-4 h-4 text-gray-400 group-hover:text-violet-500 transition req-chevron-${detailId}"></i>
             </div>
@@ -5626,7 +6285,7 @@ function renderApprovalsHistory() {
             </div>
             <div class="ml-auto flex items-center gap-1.5 bg-white border border-violet-100 rounded-xl px-3 py-1.5 shrink-0">
               <i data-lucide="coins" class="w-4 h-4 text-violet-500"></i>
-              <span class="text-sm font-bold text-violet-700">${req.points} pts</span>
+              <span class="text-sm font-bold text-violet-700">${req.points} puntos</span>
             </div>
           </div>
           ${req.rejectionNote ? `<p class="mt-2 text-xs text-red-500 bg-red-50 rounded-xl px-3 py-2"><span class="font-semibold">Motivo de rechazo:</span> ${req.rejectionNote}</p>` : ''}
@@ -5647,7 +6306,7 @@ function approveRequest(reqId) {
   if (cost > 0 && req.fundingSource !== 'self') {
     const adminPts = currentUser?.points_to_give ?? 0;
     if (adminPts < cost) {
-      showErrorToast(`No tenés suficientes puntos para aprobar este programa (necesitás ${cost} pts, tenés ${adminPts} pts).`);
+      showErrorToast(`No tenés suficientes puntos para aprobar este programa (necesitás ${cost} puntos, tenés ${adminPts} puntos).`);
       return;
     }
   }
@@ -6117,27 +6776,60 @@ function _renderProgramsUsageWidget(recognitions) {
   }).join('');
 }
 
+function _buildModalProgramCard(p) {
+  return `<div class="program-item p-4 rounded-xl border-2 border-gray-200 hover:border-violet-400 cursor-pointer transition text-center relative"
+       onclick="selectProgram(this,'${p.emoji} ${p.name}')"
+       ${p.description ? `data-description="${esc(p.description)}" onmouseenter="showProgTooltip(this)" onmouseleave="hideProgTooltip()"` : ''}>
+    <span class="text-3xl">${p.emoji}</span>
+    <p class="text-sm font-semibold text-gray-800 mt-2">${p.name}</p>
+    ${p.description ? `<span class="absolute top-2 right-2 w-4 h-4 rounded-full bg-gray-100 text-gray-400 text-[9px] font-bold flex items-center justify-center leading-none pointer-events-none">i</span>` : ''}
+  </div>`;
+}
+
 function renderProgramsInModal() {
   const grid = document.getElementById('programs-grid');
   if (!grid) return;
 
-  const active = _visiblePrograms();
-
-  if (active.length === 0) {
-    active.push(...DEFAULT_PROGRAMS);
-  }
-
   selectedProgram = null;
   updateModalBtn();
 
-  grid.innerHTML = active.map(p => `
-    <div class="program-item p-4 rounded-xl border-2 border-gray-200 hover:border-violet-400 cursor-pointer transition text-center relative"
-         onclick="selectProgram(this,'${p.emoji} ${p.name}')"
-         ${p.description ? `data-description="${esc(p.description)}" onmouseenter="showProgTooltip(this)" onmouseleave="hideProgTooltip()"` : ''}>
-      <span class="text-3xl">${p.emoji}</span>
-      <p class="text-sm font-semibold text-gray-800 mt-2">${p.name}</p>
-      ${p.description ? `<span class="absolute top-2 right-2 w-4 h-4 rounded-full bg-gray-100 text-gray-400 text-[9px] font-bold flex items-center justify-center leading-none pointer-events-none">i</span>` : ''}
-    </div>`).join('');
+  const isSuperadmin = currentUser?.role === 'superadmin' && !isImpersonating;
+
+  if (isSuperadmin) {
+    const globals  = DEFAULT_PROGRAMS.filter(p => p.active !== false);
+    const customs  = companyPrograms.filter(p => p.custom && !p.pending && p.active !== false);
+
+    // Group customs by company
+    const byCompany = {};
+    customs.forEach(p => {
+      const key = p.company_id || '_unknown';
+      if (!byCompany[key]) byCompany[key] = [];
+      byCompany[key].push(p);
+    });
+
+    const globalsHtml = `
+      <div class="col-span-full mb-1">
+        <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2">Programas globales</p>
+      </div>
+      ${globals.map(_buildModalProgramCard).join('')}`;
+
+    const customsHtml = Object.entries(byCompany).map(([companyId, progs]) => {
+      const companyName = _companiesData.find(c => c.id === companyId)?.name || companyId;
+      return `
+        <div class="col-span-full mt-3 mb-1">
+          <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2">🏢 ${esc(companyName)}</p>
+        </div>
+        ${progs.map(_buildModalProgramCard).join('')}`;
+    }).join('');
+
+    grid.innerHTML = globalsHtml + (customsHtml ? customsHtml : '');
+    return;
+  }
+
+  // Non-superadmin: flat list as before
+  let active = _visiblePrograms();
+  if (active.length === 0) active = [...DEFAULT_PROGRAMS];
+  grid.innerHTML = active.map(_buildModalProgramCard).join('');
 }
 
 function showProgTooltip(el) {
@@ -7076,21 +7768,13 @@ function _deductProgramBudget(id, points) {
 //    Support Widget                                                             
 const _FAQ = [
   { q: '¿Cómo enviar un reconocimiento?',
-    a: 'Hacé clic en el botón "Reconocer" en la pantalla principal. Elegí la persona, selecció un valor y escribí un mensaje.' },
+    a: 'Hacé clic en algún botón de "Reconocer" o buscá a un compañero en el box de búsqueda del inicio. Elegí la persona y seguí los pasos para enviar un mensaje significativo a tu compañero.' },
   { q: '¿Cómo crear un programa personalizado?',
-    a: 'Andá a "Programas" en el menú lateral. Hacé clic en "+ Nuevo programa", escribí el nombre y elegí un emoji.' },
+    a: 'En el panel lateral, hace click en "Programas". Hacé clic en el botón "+ Nuevo programa" del lado derecho y seguí los pasos para crear un programa, acordáte de leer los consejos y condiciones.' },
   { q: '¿Cómo canjear puntos?',
-    a: 'Andá a "Tienda" en el menú lateral. Elegí la recompensa y confirmá el canje. Los puntos se descuentan automáticamente.' },
-  { q: '¿Qué son los puntos?',
-    a: 'Los puntos son la moneda de reconocimiento. Cada usuario tiene puntos para dar y para canjear en la tienda.' },
+    a: 'Si tenés puntos para canjear podés hacer clic en tu saldo en la pantalla de inicio o en el botón de "Store" en el panel lateral para navegar por la tienda y ver todos los canjes posibles. Seleccioná el artículo que quieras y seguí los pasos para completar tu pedido.' },
   { q: '¿Qué es un reconocimiento privado?',
-    a: 'Solo lo ven vos, el destinatario y los administradores. No aparece en el feed público. Activálo con el toggle en el paso 3 del modal.' },
-  { q: '¿Cómo agregar empleados?',
-    a: 'Si sos administrador, andá al panel Admin. Podés agregar empleados uno por uno o importar desde un CSV.' },
-  { q: '¿Cómo vincular mi cuenta de Slack?',
-    a: 'En Slack escribí /allay link tu@email.com. Una vez vinculado podés enviar reconocimientos con /allay @nombre Valor Mensaje.' },
-  { q: '¿Cómo ver Analytics?',
-    a: 'El botón Analytics aparece en la barra lateral si sos administrador. Desde ahí accedés a engagement, insights y reportes.' },
+    a: 'Solo lo ven vos, el destinatario y los administradores de la plataforma. No aparece en el feed público. Activálo con el toggle en el paso 3 del modal.' },
   { q: '¿Cómo cambiar mi contraseña?',
     a: 'Hacé clic en tu avatar en la barra lateral. Desde Configuración de perfil encontrás la opción para actualizar la contraseña.' },
 ];
