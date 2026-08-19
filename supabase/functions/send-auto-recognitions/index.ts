@@ -120,6 +120,34 @@ async function sendEmail(opts: {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
+  const url   = new URL(req.url);
+  const force = url.searchParams.get('force') === 'true';
+
+  const authHeader = req.headers.get('Authorization') || '';
+
+  // ?force=true is a manual override — requires superadmin JWT
+  if (force) {
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const callerClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    const { data: callerProfile } = await callerClient
+      .from('profiles')
+      .select('role')
+      .single();
+    if (!callerProfile || callerProfile.role !== 'superadmin') {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   const admin = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -128,9 +156,6 @@ Deno.serve(async (req) => {
   const resendKey   = Deno.env.get('RESEND_API_KEY') || '';
   const platformUrl = Deno.env.get('SITE_URL') || 'https://allay.app';
 
-  // Allow manual override via ?force=true to skip time check
-  const url     = new URL(req.url);
-  const force   = url.searchParams.get('force') === 'true';
   const nowHHMM = currentUtcHHMM();
   const today   = todayDDMM();
   const todayDate = todayISO();
@@ -160,6 +185,20 @@ Deno.serve(async (req) => {
     }
 
     const companyId = settings.company_id;
+
+    // Distributed lock: prevents duplicate sends if the cron fires twice simultaneously.
+    // INSERT fails on conflict → another invocation already claimed this slot, skip.
+    if (!force) {
+      const runKey = `${todayDate} ${nowHHMM}`;
+      const { error: lockErr } = await admin
+        .from('auto_recognition_runs')
+        .insert({ company_id: companyId, run_key: runKey });
+      if (lockErr) {
+        // Conflict (duplicate key) or other error → skip this company
+        summary.skipped++;
+        continue;
+      }
+    }
 
     // Get first admin or superadmin of this company as sender
     const { data: adminUser } = await admin

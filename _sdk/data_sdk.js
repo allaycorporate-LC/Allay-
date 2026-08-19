@@ -5,7 +5,8 @@ const SUPABASE_URL     = 'https://smuwnjpmpmwfuysrxkaa.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNtdXduanBtcG13ZnV5c3J4a2FhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MjU3MTAsImV4cCI6MjA5MjIwMTcxMH0.onYPx78n5TaSeig3VQebQY9E6ClvxKZ8eAIebaxLDRQ';
 
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-window._sb = _sb; // exposed for RPC calls that need the authenticated client
+// Expose only the auth object — not the full DB client — to minimize XSS blast radius
+window._sbAuth = _sb.auth;
 
 // Solo loguear en desarrollo — no exponer errores internos en producción
 var _isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -38,7 +39,11 @@ window.dataSdk = (function () {
   let _handler = null;
 
   async function fetchAndNotify() {
-    const { data, error } = await _sb.from('profiles').select('*');
+    const { data, error } = await _sb.from('profiles').select(
+      'id, name, email, department, company_id, role, points_to_give, points_to_redeem, ' +
+      'password_changed, birthday, anniversary_date, auto_birthday, auto_anniversary, ' +
+      'recognition_visibility, bio, interests, work_style'
+    );
     if (error) { _log('dataSdk fetch error:', error.message); return; }
     if (_handler) _handler.onDataChanged((data || []).map(mapProfile));
   }
@@ -66,6 +71,14 @@ window.dataSdk = (function () {
 
     async refresh() {
       await fetchAndNotify();
+    },
+
+    async updateUserRole(targetUserId, newRole) {
+      const { error } = await _sb.rpc('update_user_role', {
+        p_target_user_id: targetUserId,
+        p_new_role:       newRole,
+      });
+      return { isOk: !error, error };
     },
 
     async create(record) {
@@ -381,7 +394,7 @@ window.approvalsSdk = {
   async load(companyId) {
     const { data, error } = await _sb
       .from('program_budget_requests')
-      .select('*')
+      .select('id, company_id, requested_by, status, data, created_at, processed_at, processed_by')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
       .limit(200);
@@ -431,7 +444,7 @@ window.pointsRequestSdk = {
     // Primero buscar si hay alguna solicitud pendiente (tiene prioridad visual)
     const { data: pending } = await _sb
       .from('points_purchase_requests')
-      .select('*')
+      .select('id, company_id, requested_by, points, status, created_at, processed_at, processed_by')
       .eq('company_id', companyId)
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
@@ -442,7 +455,7 @@ window.pointsRequestSdk = {
     // Si no hay pendiente, mostrar la más reciente (aprobada/rechazada)
     const { data, error } = await _sb
       .from('points_purchase_requests')
-      .select('*')
+      .select('id, company_id, requested_by, points, status, created_at, processed_at, processed_by')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -455,7 +468,7 @@ window.pointsRequestSdk = {
   async getAllPending() {
     const { data, error } = await _sb
       .from('points_purchase_requests')
-      .select('*')
+      .select('id, company_id, requested_by, points, status, created_at, processed_at, processed_by')
       .eq('status', 'pending')
       .order('created_at', { ascending: false });
     if (error) _log('pointsRequest getAllPending error:', error.message);
@@ -477,7 +490,7 @@ window.autoRecognitionSdk = {
   async getSettings(companyId) {
     const { data, error } = await _sb
       .from('auto_recognition_settings')
-      .select('*')
+      .select('company_id, enabled, birthday_enabled, anniversary_enabled, birthday_message, anniversary_message, birthday_points, anniversary_points, birthday_program, anniversary_program, send_time, send_email_notification')
       .eq('company_id', companyId)
       .maybeSingle();
     if (error) _log('autoRecognition getSettings error:', error.message);
@@ -515,12 +528,12 @@ window.autoRecognitionSdk = {
 // ─── Company SDK ─────────────────────────────────────────────────────────────
 window.companySdk = {
   async list() {
-    const { data, error } = await _sb.from('companies').select('*').order('name');
+    const { data, error } = await _sb.from('companies').select('id, name, domain, store_enabled').order('name');
     if (error) _log('companies list error:', error.message);
     return { isOk: !error, data: data || [] };
   },
   async getById(companyId) {
-    const { data, error } = await _sb.from('companies').select('*').eq('id', companyId).maybeSingle();
+    const { data, error } = await _sb.from('companies').select('id, name, domain, store_enabled').eq('id', companyId).maybeSingle();
     if (error) _log('companies getById error:', error.message);
     return { isOk: !error, data };
   },
@@ -535,6 +548,12 @@ window.companySdk = {
     return { isOk: !error, data, error };
   },
   async remove(id) {
+    // Cascade delete in FK dependency order
+    const tables = ['program_overrides', 'rewards', 'recognitions', 'programs', 'auto_recognition_settings', 'profiles'];
+    for (const table of tables) {
+      const { error } = await _sb.from(table).delete().eq('company_id', id);
+      if (error) _log(`companies remove: error deleting ${table}:`, error.message);
+    }
     const { error } = await _sb.from('companies').delete().eq('id', id);
     if (error) _log('companies delete error:', error.message);
     return { isOk: !error };
@@ -573,7 +592,7 @@ window.supportSdk = {
 window.notificationSdk = {
   async list() {
     const { data, error } = await _sb.from('notifications')
-      .select('*').order('created_at', { ascending: false }).limit(50);
+      .select('id, user_id, type, data, read, created_at').order('created_at', { ascending: false }).limit(50);
     if (error) _log('notifications list error:', error.message);
     return { isOk: !error, data: data || [] };
   },
@@ -653,7 +672,8 @@ window.notificationSdk = {
 window.rewardSdk = {
   async list(companyId) {
     const { data, error } = await _sb.from('rewards')
-      .select('*').or(`company_id.eq.${companyId},company_id.is.null`).eq('available', true)
+      .select('id, company_id, name, description, points_cost, category, image_url, emoji, available, stock, badge')
+      .or(`company_id.eq.${companyId},company_id.is.null`).eq('available', true)
       .order('points_cost');
     if (error) _log('rewards list error:', error.message);
     return { isOk: !error, data: data || [] };
@@ -667,7 +687,8 @@ window.rewardSdk = {
 
   async listAll() {
     const { data, error } = await _sb.from('rewards')
-      .select('*').order('points_cost');
+      .select('id, company_id, name, description, points_cost, category, image_url, emoji, available, stock, badge')
+      .order('points_cost');
     if (error) _log('rewards listAll error:', error.message);
     return { isOk: !error, data: data || [] };
   },
@@ -699,7 +720,8 @@ window.rewardSdk = {
 window.programsSdk = {
   async list(companyId) {
     const { data, error } = await _sb.from('programs')
-      .select('*').eq('company_id', companyId)
+      .select('id, company_id, name, emoji, description, tag, budget, budget_remaining, active, pending, created_at, custom, image_url, target_employee_ids, created_by')
+      .eq('company_id', companyId)
       .order('created_at');
     if (error) _log('programs list error:', error.message);
     return { isOk: !error, data: data || [] };
@@ -707,7 +729,8 @@ window.programsSdk = {
 
   async listAll() {
     const { data, error } = await _sb.from('programs')
-      .select('*').order('company_id').order('created_at');
+      .select('id, company_id, name, emoji, description, tag, budget, budget_remaining, active, pending, created_at, custom, image_url, target_employee_ids, created_by')
+      .order('company_id').order('created_at');
     if (error) _log('programs listAll error:', error.message);
     return { isOk: !error, data: data || [] };
   },
@@ -734,7 +757,8 @@ window.programsSdk = {
 
   async listOverrides(companyId) {
     const { data, error } = await _sb.from('program_overrides')
-      .select('*').eq('company_id', companyId);
+      .select('id, company_id, program_key, name, emoji, description, tag')
+      .eq('company_id', companyId);
     if (error) _log('program_overrides list error:', error.message);
     return { isOk: !error, data: data || [] };
   },
@@ -1200,8 +1224,9 @@ window.csvRequestSdk = {
   },
 
   async list() {
+    // Deliberately excludes csv_content — it contains full employee data and is only needed by the edge function
     const { data, error } = await _sb.from('csv_requests')
-      .select('*')
+      .select('id, company_id, requested_by, file_name, row_count, status, created_at, reviewed_at, reviewed_by, rejection_reason')
       .order('created_at', { ascending: false });
     if (error) _log('csvRequests list error:', error.message);
     return { isOk: !error, data: data || [] };
@@ -1270,6 +1295,21 @@ window.csvRequestSdk = {
       _log('csvRequest reject exception:', e);
       return { isOk: false, error: e.message };
     }
+  },
+};
+
+// ─── Audit SDK ────────────────────────────────────────────────────────────────
+window.auditSdk = {
+  async list({ page = 0, limit = 50, action = null, companyId = null } = {}) {
+    let query = _sb.from('audit_logs')
+      .select('id, created_at, actor_id, actor_email, actor_role, company_id, action, target_id, target_type, target_name, metadata')
+      .order('created_at', { ascending: false })
+      .range(page * limit, (page + 1) * limit - 1);
+    if (action) query = query.eq('action', action);
+    if (companyId) query = query.eq('company_id', companyId);
+    const { data, error } = await query;
+    if (error) _log('auditSdk list error:', error.message);
+    return { isOk: !error, data: data || [] };
   },
 };
 

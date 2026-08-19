@@ -338,7 +338,7 @@ async function sendPasswordReset() {
   errorDiv.classList.add('hidden');
 
   const redirectTo = window.location.origin + window.location.pathname;
-  const { error } = await window._sb.auth.resetPasswordForEmail(email, { redirectTo });
+  const { error } = await window._sbAuth.resetPasswordForEmail(email, { redirectTo });
 
   btn.disabled = false;
   btn.innerHTML = '<i data-lucide="send" class="w-4 h-4"></i> Enviar link de recuperación';
@@ -389,7 +389,7 @@ async function saveRecoveryPassword() {
   btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Guardando...';
   lucide.createIcons({ nodes: [btn] });
 
-  const { error } = await window._sb.auth.updateUser({ password: newPw });
+  const { error } = await window._sbAuth.updateUser({ password: newPw });
 
   btn.disabled = false;
   btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Guardar nueva contraseña';
@@ -402,13 +402,13 @@ async function saveRecoveryPassword() {
   }
 
   // Sign out recovery session so user logs in with new credentials
-  await window._sb.auth.signOut();
+  await window._sbAuth.signOut();
   document.getElementById('recovery-password-page').classList.add('hidden');
   showSuccessToast('¡Contraseña actualizada! Iniciá sesión con tu nueva contraseña.');
 }
 
 // Detect Supabase PASSWORD_RECOVERY event (user clicked the email link)
-window._sb.auth.onAuthStateChange((event) => {
+window._sbAuth.onAuthStateChange((event) => {
   if (event === 'PASSWORD_RECOVERY') {
     _openRecoveryPasswordPage();
   }
@@ -1166,7 +1166,7 @@ async function submitCsvRequest() {
     }
 
     if (result.data?.id) {
-      const { data: { session } } = await window._sb.auth.getSession().catch(() => ({ data: { session: null } }));
+      const { data: { session } } = await window._sbAuth.getSession().catch(() => ({ data: { session: null } }));
       const token = session?.access_token;
 
       if (token) {
@@ -1461,7 +1461,7 @@ async function approveCsvRequest(id) {
 
   // Notificar al admin que lo solicitó (client-side para garantizar el destinatario correcto)
   if (req.requested_by) {
-    const { data: { session } } = await window._sb.auth.getSession().catch(() => ({ data: { session: null } }));
+    const { data: { session } } = await window._sbAuth.getSession().catch(() => ({ data: { session: null } }));
     const token = session?.access_token;
     if (token) {
       fetch(`${SUPABASE_URL}/functions/v1/send-recognition-notifications`, {
@@ -1662,11 +1662,7 @@ async function saveRoleChange() {
   lucide.createIcons();
 
   try {
-    // Use the security-definer RPC so the role change bypasses client-side RLS restrictions
-    const { error } = await window._sb.rpc('update_user_role', {
-      p_target_user_id: employee.__backendId,
-      p_new_role:        newRole,
-    });
+    const { error } = await window.dataSdk.updateUserRole(employee.__backendId, newRole);
 
     if (!error) {
       // Update local cache immediately so the UI reflects the change without re-fetching
@@ -2825,7 +2821,7 @@ async function saveSettings() {
         return;
       }
       if (pwErr) pwErr.classList.add('hidden');
-      const { error: pwError } = await window._sb.auth.updateUser({ password: newPw });
+      const { error: pwError } = await window._sbAuth.updateUser({ password: newPw });
       if (pwError) {
         showErrorToast('No se pudo cambiar la contraseña: ' + pwError.message);
         return;
@@ -2885,10 +2881,103 @@ function openAdmin() {
   updateAdminQuicknav();
   loadCompanyPrograms();
   renderAutoRecognitionsAdmin();
-  if (currentUser?.role === 'superadmin') { loadCompanies(); loadCsvRequests(); }
+  if (currentUser?.role === 'superadmin') { loadCompanies(); loadCsvRequests(); loadAuditLog(); }
   if (currentUser?.role === 'admin') { loadAdminCsvHistory(); }
 }
 function openAdminPage() { openAdmin(); }
+
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+let _auditPage = 0;
+const _AUDIT_PAGE_SIZE = 50;
+
+const _AUDIT_LABELS = {
+  'user.create':         { label: 'Usuario creado',              icon: 'user-plus',     color: 'text-green-600 bg-green-50' },
+  'user.delete':         { label: 'Usuario eliminado',           icon: 'user-x',        color: 'text-red-600 bg-red-50'     },
+  'role.change':         { label: 'Rol cambiado',                icon: 'shield',        color: 'text-blue-600 bg-blue-50'   },
+  'csv.approve':         { label: 'CSV aprobado',                icon: 'file-check-2',  color: 'text-violet-600 bg-violet-50' },
+  'csv.reject':          { label: 'CSV rechazado',               icon: 'file-x-2',      color: 'text-orange-600 bg-orange-50' },
+  'recognition.delete':  { label: 'Reconocimiento eliminado',    icon: 'trophy',        color: 'text-amber-600 bg-amber-50' },
+  'comment.delete':      { label: 'Comentario eliminado',        icon: 'message-x',     color: 'text-gray-600 bg-gray-100'  },
+};
+
+async function loadAuditLog() {
+  if (!window.auditSdk || currentUser?.role !== 'superadmin') return;
+  const list = document.getElementById('audit-log-list');
+  if (!list) return;
+  list.innerHTML = '<p class="text-center py-8 text-gray-400 text-sm">Cargando...</p>';
+
+  const actionFilter = document.getElementById('audit-filter-action')?.value || null;
+  const { isOk, data } = await window.auditSdk.list({
+    page: _auditPage,
+    limit: _AUDIT_PAGE_SIZE,
+    action: actionFilter || null,
+  });
+
+  if (!isOk || !data.length) {
+    list.innerHTML = '<p class="text-center py-8 text-gray-400 text-sm">No hay registros de auditoría.</p>';
+    document.getElementById('audit-pagination')?.classList.add('hidden');
+    return;
+  }
+
+  list.innerHTML = data.map(entry => {
+    const meta   = _AUDIT_LABELS[entry.action] || { label: entry.action, icon: 'activity', color: 'text-gray-600 bg-gray-100' };
+    const ts     = new Date(entry.created_at).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+    const knownUser = entry.actor_id
+      ? (typeof allUsers !== 'undefined' ? allUsers : []).find(u => u.__backendId === entry.actor_id)
+      : null;
+    const actor  = entry.actor_email || knownUser?.name || knownUser?.email || '—';
+    const detail = _auditDetail(entry);
+    return `
+      <div class="flex items-start gap-4 px-6 py-4 hover:bg-gray-50 transition">
+        <div class="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center ${meta.color}">
+          <i data-lucide="${meta.icon}" class="w-4 h-4"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-sm font-semibold text-gray-800">${esc(meta.label)}</span>
+            ${entry.target_name ? `<span class="text-sm text-gray-500">· ${esc(entry.target_name)}</span>` : ''}
+          </div>
+          <p class="text-xs text-gray-400 mt-0.5">${esc(detail)}</p>
+        </div>
+        <div class="text-right shrink-0">
+          <p class="text-xs font-medium text-gray-600">${esc(actor)}</p>
+          <p class="text-xs text-gray-400 mt-0.5">${ts}</p>
+        </div>
+      </div>`;
+  }).join('');
+
+  const pagination = document.getElementById('audit-pagination');
+  const pageInfo   = document.getElementById('audit-page-info');
+  if (pagination && pageInfo) {
+    pagination.classList.toggle('hidden', data.length < _AUDIT_PAGE_SIZE && _auditPage === 0);
+    pageInfo.textContent = `Página ${_auditPage + 1}`;
+    const prevBtn = document.getElementById('audit-prev');
+    const nextBtn = document.getElementById('audit-next');
+    if (prevBtn) prevBtn.disabled = _auditPage === 0;
+    if (nextBtn) nextBtn.disabled = data.length < _AUDIT_PAGE_SIZE;
+  }
+
+  lucide.createIcons();
+}
+
+function _auditDetail(entry) {
+  const m = entry.metadata || {};
+  switch (entry.action) {
+    case 'user.create':  return `${m.email || ''} · rol: ${m.role || ''} · depto: ${m.department || ''}`;
+    case 'user.delete':  return `${m.email || ''} · rol previo: ${m.role || ''}`;
+    case 'role.change':  return `${m.email || entry.target_name || ''}: ${m.old_role || '?'} → ${m.new_role || '?'}`;
+    case 'csv.approve':  return `${m.row_count || 0} filas · ${m.ok_count || 0} ok · ${m.fail_count || 0} errores`;
+    case 'csv.reject':   return `${m.row_count || 0} filas${m.rejection_reason ? ' · ' + m.rejection_reason : ''}`;
+    case 'recognition.delete': return `programa: ${entry.target_name || ''} · ${m.points || 0} pts`;
+    case 'comment.delete':     return entry.target_name || '';
+    default: return entry.target_id || '';
+  }
+}
+
+function auditPage(dir) {
+  _auditPage = Math.max(0, _auditPage + dir);
+  loadAuditLog();
+}
 
 // ── Auto Recognitions Admin ───────────────────────────────────────────────────
 function adminScrollTo(sectionId) {
@@ -2906,6 +2995,7 @@ function updateAdminQuicknav() {
   document.getElementById('qnav-companies')?.classList.toggle('hidden', !isSA);
   document.getElementById('qnav-csv-requests')?.classList.toggle('hidden', !isSA);
   document.getElementById('qnav-ar-companies')?.classList.toggle('hidden', !isSA);
+  document.getElementById('qnav-audit')?.classList.toggle('hidden', !isSA);
 }
 
 function toggleArSection() {
@@ -3648,6 +3738,7 @@ function updateAdminVisibility() {
   else document.getElementById('points-nav-link')?.classList.remove('flex');
   document.getElementById('superadmin-companies-section')?.classList.toggle('hidden', !isSA);
   document.getElementById('superadmin-csv-requests-section')?.classList.toggle('hidden', !isSA);
+  document.getElementById('superadmin-audit-section')?.classList.toggle('hidden', !isSA);
   const isAdminOnly = isAdmin && !isSA;
   document.getElementById('admin-csv-history-section')?.classList.toggle('hidden', !isAdminOnly);
   document.body.classList.toggle('is-admin', isAdmin);
@@ -5632,8 +5723,8 @@ function buildStoreRewardCard(r, userPts, isPlaceholder, cat) {
   const canAfford  = userPts >= cost;
   const missing    = cost - userPts;
   const badge      = r.badge || null;
-  const name       = (r.name || '').replace(/'/g, '&#39;');
-  const desc       = r.description || r.desc || '';
+  const name       = esc(r.name || '');
+  const desc       = esc(r.description || r.desc || '');
   const id         = r.id || '';
   const imgSrc     = r.image_url || r.img || _storePlaceholderImg(r.emoji || cat?.emoji, cat?.bg);
   const outOfStock = !isPlaceholder && r.stock !== null && r.stock !== undefined && r.stock <= 0;
@@ -5680,8 +5771,8 @@ function buildStoreRewardCard(r, userPts, isPlaceholder, cat) {
 
 function buildSuperadminRewardCard(r, redemptionCount, cat) {
   const cost      = r.points_cost ?? 0;
-  const name      = (r.name || '').replace(/'/g, '&#39;');
-  const desc      = r.description || '';
+  const name      = esc(r.name || '');
+  const desc      = esc(r.description || '');
   const id        = r.id || '';
   const imgSrc    = r.image_url || _storePlaceholderImg(r.emoji || cat?.emoji, cat?.bg);
   const stock     = r.stock;
@@ -6549,7 +6640,7 @@ function renderProgramsPage() {
   const pending = companyPrograms.filter(p => {
     if (!p.pending) return false;
     if (currentUser?.role === 'admin') return true;
-    return p.createdBy === userId || p.company_id === currentUser?.company_id;
+    return p.createdBy === userId || (Array.isArray(p.employees) && p.employees.includes(userId));
   });
 
   if (!active.length && !pending.length) {

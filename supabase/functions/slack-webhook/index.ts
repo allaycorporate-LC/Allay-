@@ -62,23 +62,62 @@ Deno.serve(async (req) => {
   const slackUserId = params.get('user_id') || '';
   const text        = (params.get('text') || '').trim();
 
-  // Comando: /allay link → vincula cuenta
+  // Comando: /allay link → vincula cuenta vía verificación por email
   if (text.startsWith('link ')) {
     const email = text.replace('link ', '').trim().toLowerCase();
     const admin = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
-    const { error } = await admin
-      .from('profiles')
-      .update({ slack_user_id: slackUserId })
-      .eq('email', email);
 
-    return slackResponse(
-      error
-        ? `⚠️ No encontré una cuenta con el email \`${email}\`. Verificá que sea tu email de Allay.`
-        : `✅ Tu cuenta de Slack quedó vinculada a \`${email}\` en Allay. ¡Ya podés reconocer a tus compañeros!`
-    );
+    // Verificar que existe un perfil con ese email
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('id, email')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (!profile) {
+      return slackResponse(`⚠️ No encontré una cuenta con el email \`${email}\`. Verificá que sea tu email de Allay.`);
+    }
+
+    // Generar token de verificación
+    const tokenBytes = new Uint8Array(32);
+    crypto.getRandomValues(tokenBytes);
+    const token = Array.from(tokenBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+    await admin.from('slack_link_tokens').insert({
+      token,
+      email,
+      slack_user_id: slackUserId,
+      expires_at: expiresAt,
+      used: false,
+    });
+
+    const siteUrl = Deno.env.get('SITE_URL') || 'https://allay.app';
+    const verifyUrl = `${siteUrl}/functions/v1/slack-verify?token=${token}`;
+
+    const resendKey = Deno.env.get('RESEND_API_KEY');
+    if (resendKey) {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: 'Allay <onboarding@resend.dev>',
+          to: [email],
+          subject: '🔗 Confirmá la vinculación de tu cuenta de Slack con Allay',
+          html: `<div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px;">
+            <h2 style="color:#3d2b56;">Confirmar vinculación con Slack</h2>
+            <p>Recibimos una solicitud para vincular tu cuenta de Allay con Slack. Si la hiciste vos, hacé clic en el siguiente botón:</p>
+            <a href="${verifyUrl}" style="display:inline-block;background:#7c3aed;color:#fff;padding:12px 28px;border-radius:10px;font-weight:600;text-decoration:none;margin:16px 0;">Confirmar vinculación</a>
+            <p style="color:#9ca3af;font-size:13px;">Este link expira en 15 minutos. Si no solicitaste esto, ignorá este email.</p>
+          </div>`,
+        }),
+      });
+    }
+
+    return slackResponse(`📧 Te enviamos un email a \`${email}\` para confirmar la vinculación. Revisá tu bandeja y hacé clic en el link (válido 15 minutos).`);
   }
 
   // Comando: /allay help

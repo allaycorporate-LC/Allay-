@@ -114,14 +114,30 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    // Get the caller's user ID from JWT
+    // Verify caller JWT and role
     const authHeader = req.headers.get('Authorization') || '';
-    const token = authHeader.replace('Bearer ', '');
-    let reviewerId: string | null = null;
-    try {
-      const { data: { user } } = await admin.auth.getUser(token);
-      reviewerId = user?.id || null;
-    } catch { /* non-critical */ }
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const callerClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    const { data: callerProfile, error: callerErr } = await callerClient
+      .from('profiles')
+      .select('id, email, role')
+      .single();
+
+    if (callerErr || !callerProfile || !['admin', 'superadmin'].includes(callerProfile.role)) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const reviewerId = callerProfile.id;
 
     // Fetch the request
     const { data: csvReq, error: reqErr } = await admin
@@ -160,6 +176,18 @@ Deno.serve(async (req) => {
           read: false,
         });
       }
+
+      await admin.from('audit_logs').insert({
+        actor_id:    callerProfile.id,
+        actor_email: callerProfile.email,
+        actor_role:  callerProfile.role,
+        company_id:  csvReq.company_id || null,
+        action:      'csv.reject',
+        target_id:   request_id,
+        target_type: 'csv_request',
+        target_name: csvReq.file_name || 'archivo.csv',
+        metadata:    { row_count: csvReq.row_count, rejection_reason: rejection_reason || null },
+      });
 
       return new Response(JSON.stringify({ ok: true, action: 'rejected' }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -261,6 +289,18 @@ Deno.serve(async (req) => {
         read: false,
       });
     }
+
+    await admin.from('audit_logs').insert({
+      actor_id:    callerProfile.id,
+      actor_email: callerProfile.email,
+      actor_role:  callerProfile.role,
+      company_id:  csvReq.company_id || null,
+      action:      'csv.approve',
+      target_id:   request_id,
+      target_type: 'csv_request',
+      target_name: csvReq.file_name || 'archivo.csv',
+      metadata:    { row_count: csvReq.row_count, ok_count: okCount, fail_count: failCount },
+    });
 
     return new Response(JSON.stringify({ ok: true, action: 'approved', results, okCount, failCount }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },

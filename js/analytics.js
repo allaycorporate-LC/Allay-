@@ -158,9 +158,10 @@ function _chartImg(id) {
 }
 
 function _pdfTbl(headers, rows) {
+  const e = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   if (!rows?.length) return '<p style="color:#9ca3af;font-size:11px;font-style:italic;margin-bottom:14px;">Sin datos en el período seleccionado.</p>';
-  return `<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${
-    rows.map(r=>`<tr>${r.map(c=>`<td>${c??''}</td>`).join('')}</tr>`).join('')
+  return `<table><thead><tr>${headers.map(h=>`<th>${e(h)}</th>`).join('')}</tr></thead><tbody>${
+    rows.map(r=>`<tr>${r.map(c=>`<td>${e(c)}</td>`).join('')}</tr>`).join('')
   }</tbody></table>`;
 }
 

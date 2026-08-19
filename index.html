@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Allay - Reconocimiento Interno</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>">
 
   <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
@@ -53,7 +54,7 @@
     }
   </script>
 
-  <script src="_sdk/data_sdk.js?v=52" type="text/javascript"></script>
+  <script src="_sdk/data_sdk.js?v=58" type="text/javascript"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
@@ -1185,7 +1186,7 @@
         <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
       </button>
       <div class="w-8 h-8 rounded-xl bg-[#fff0f6] flex items-center justify-center shrink-0">
-        <i data-lucide="calendar-cog" class="w-4 h-4 text-[#f19ac4]"></i>
+        <i data-lucide="calendar-range" class="w-4 h-4 text-[#f19ac4]"></i>
       </div>
       <h1 class="text-lg font-bold text-gray-800">Reconocimientos automáticos por empresa</h1>
     </div>
@@ -1366,7 +1367,7 @@
       <i data-lucide="building-2" class="w-3.5 h-3.5"></i> Empresas
     </button>
     <button id="qnav-ar-companies" onclick="openSuperadminArPage()" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
-      <i data-lucide="calendar-cog" class="w-3.5 h-3.5"></i> Config. por empresa
+      <i data-lucide="calendar-range" class="w-3.5 h-3.5"></i> Config. por empresa
     </button>
     <button id="qnav-csv-requests" onclick="adminScrollTo('superadmin-csv-requests-section')" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
       <i data-lucide="file-check-2" class="w-3.5 h-3.5"></i> Solicitudes CSV
@@ -1376,6 +1377,9 @@
     </button>
     <button onclick="adminScrollTo('admin-section-ar')" class="admin-qnav-btn shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
       <i data-lucide="calendar-heart" class="w-3.5 h-3.5"></i> Reconocimientos automáticos
+    </button>
+    <button id="qnav-audit" onclick="adminScrollTo('superadmin-audit-section')" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
+      <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> Auditoría
     </button>
   </div>
 
@@ -1724,6 +1728,49 @@
     </div>
 
     <!-- Add test user modal -->
+
+    <!-- Audit Log (superadmin only) -->
+    <div id="superadmin-audit-section" class="hidden bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mt-6">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center shrink-0">
+            <i data-lucide="shield-check" class="w-5 h-5 text-violet-500"></i>
+          </div>
+          <div>
+            <h2 class="text-base font-bold text-gray-800">Registro de auditoría</h2>
+            <p class="text-xs text-gray-400">Historial de acciones administrativas en la plataforma</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <select id="audit-filter-action" onchange="loadAuditLog()" class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-300">
+            <option value="">Todas las acciones</option>
+            <option value="user.create">Usuarios creados</option>
+            <option value="user.delete">Usuarios eliminados</option>
+            <option value="role.change">Cambios de rol</option>
+            <option value="csv.approve">CSV aprobados</option>
+            <option value="csv.reject">CSV rechazados</option>
+            <option value="recognition.delete">Reconocimientos eliminados</option>
+            <option value="comment.delete">Comentarios eliminados</option>
+          </select>
+          <button onclick="loadAuditLog()" class="flex items-center gap-1.5 text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-lg transition">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Actualizar
+          </button>
+        </div>
+      </div>
+      <div id="audit-log-list" class="divide-y divide-gray-50">
+        <p class="text-center py-8 text-gray-400 text-sm">Cargando...</p>
+      </div>
+      <div id="audit-pagination" class="hidden flex items-center justify-between px-6 py-3 border-t border-gray-100">
+        <button onclick="auditPage(-1)" id="audit-prev" class="flex items-center gap-1 text-sm font-semibold text-gray-500 hover:text-violet-600 disabled:opacity-30 transition">
+          <i data-lucide="chevron-left" class="w-4 h-4"></i> Anterior
+        </button>
+        <span id="audit-page-info" class="text-xs text-gray-400"></span>
+        <button onclick="auditPage(1)" id="audit-next" class="flex items-center gap-1 text-sm font-semibold text-gray-500 hover:text-violet-600 disabled:opacity-30 transition">
+          Siguiente <i data-lucide="chevron-right" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -3232,7 +3279,7 @@
   </div>
 </div>
 
-<script src="js/app.js?v=174"></script>
-<script src="js/analytics.js?v=11"></script>
+<script src="js/app.js?v=176"></script>
+<script src="js/analytics.js?v=12"></script>
 </body>
 </html>
