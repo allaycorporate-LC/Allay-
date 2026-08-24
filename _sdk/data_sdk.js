@@ -31,6 +31,7 @@ function mapProfile(p) {
     bio:                     p.bio                     || null,
     interests:               p.interests               || null,
     work_style:              p.work_style              || null,
+    notif_prefs:             p.notif_prefs             || {},
     user_id:                 p.email
   };
 }
@@ -42,7 +43,7 @@ window.dataSdk = (function () {
     const { data, error } = await _sb.from('profiles').select(
       'id, name, email, department, company_id, role, points_to_give, points_to_redeem, ' +
       'password_changed, birthday, anniversary_date, auto_birthday, auto_anniversary, ' +
-      'recognition_visibility, bio, interests, work_style'
+      'recognition_visibility, bio, interests, work_style, notif_prefs'
     );
     if (error) { _log('dataSdk fetch error:', error.message); return; }
     if (_handler) _handler.onDataChanged((data || []).map(mapProfile));
@@ -139,6 +140,7 @@ window.dataSdk = (function () {
       if ('bio'                     in record) payload.bio                     = record.bio || null;
       if ('interests'               in record) payload.interests               = record.interests || null;
       if ('work_style'              in record) payload.work_style              = record.work_style || null;
+      if ('notif_prefs'             in record) payload.notif_prefs             = record.notif_prefs || {};
 
       const { error } = await _sb.from('profiles').update(payload).eq('id', record.__backendId);
       if (error) { _log('update error:', error.message); }
@@ -562,7 +564,7 @@ window.companySdk = {
 
 // ─── Support SDK ──────────────────────────────────────────────────────────────
 window.supportSdk = {
-  async submit({ subject, message }) {
+  async submit({ subject, message, fromName, fromEmail }) {
     try {
       const { data: { session } } = await _sb.auth.getSession();
       const token = session?.access_token || SUPABASE_ANON_KEY;
@@ -573,7 +575,7 @@ window.supportSdk = {
           'apikey': SUPABASE_ANON_KEY,
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ subject, message }),
+        body: JSON.stringify({ subject, message, fromName, fromEmail }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -590,6 +592,15 @@ window.supportSdk = {
 
 // ─── Notification SDK ─────────────────────────────────────────────────────────
 window.notificationSdk = {
+  subscribeToNotifications(userId, callback) {
+    const name = `notifs-rt-${userId}-${Date.now()}`;
+    return _sb.channel(name)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` }, callback)
+      .subscribe();
+  },
+  unsubscribeNotifications(ch) {
+    if (ch) _sb.removeChannel(ch);
+  },
   async list() {
     const { data, error } = await _sb.from('notifications')
       .select('id, user_id, type, data, read, created_at').order('created_at', { ascending: false }).limit(50);
@@ -597,22 +608,15 @@ window.notificationSdk = {
     return { isOk: !error, data: data || [] };
   },
 
-  // Fetch notifications for a specific user (bypasses RLS — for admin impersonation)
+  // Fetch notifications for a specific user (superadmin RLS policy allows cross-user reads)
   async listForUser(userId) {
-    try {
-      const { data: { session } } = await _sb.auth.getSession();
-      const token = session?.access_token || SUPABASE_ANON_KEY;
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/get-user-notifications`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ user_id: userId }),
-      });
-      const json = await res.json().catch(() => ({}));
-      return { isOk: res.ok, data: json.data || [] };
-    } catch (e) {
-      _log('listForUser error:', e);
-      return { isOk: false, data: [] };
-    }
+    const q = _sb.from('notifications')
+      .select('id, user_id, type, data, read, created_at')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    const { data, error } = userId ? await q.eq('user_id', userId) : await q;
+    if (error) _log('listForUser error:', error.message);
+    return { isOk: !error, data: data || [] };
   },
 
   // Create recognition notifications for a list of recipients (uses service role)
@@ -1133,8 +1137,9 @@ window.analyticsSdk = {
 
 // ─── Auth SDK ─────────────────────────────────────────────────────────────────
 window.authSdk = {
-  async login(email, password) {
-    const { data, error } = await _sb.auth.signInWithPassword({ email, password });
+  async login(email, password, captchaToken) {
+    const opts = captchaToken ? { options: { captchaToken } } : {};
+    const { data, error } = await _sb.auth.signInWithPassword({ email, password, ...opts });
     return { isOk: !error, user: data?.user, error };
   },
 
@@ -1310,6 +1315,45 @@ window.auditSdk = {
     const { data, error } = await query;
     if (error) _log('auditSdk list error:', error.message);
     return { isOk: !error, data: data || [] };
+  },
+};
+
+// ─── Orders SDK ───────────────────────────────────────────────────────────────
+window.ordersSdk = {
+  async create({ user_id, company_id, address, items, total_points }) {
+    const { data, error } = await _sb.from('orders')
+      .insert({ user_id, company_id, address, items, total_points })
+      .select('id, order_number')
+      .single();
+    if (error) _log('orders create error:', error.message);
+    return { isOk: !error, id: data?.id, order_number: data?.order_number };
+  },
+
+  async listMine(userId) {
+    let q = _sb.from('orders')
+      .select('id, order_number, status, address, items, total_points, created_at')
+      .order('created_at', { ascending: false });
+    if (userId) q = q.eq('user_id', userId);
+    const { data, error } = await q;
+    if (error) _log('orders listMine error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+
+  async listForCompany(companyId) {
+    const q = _sb.from('orders')
+      .select('id, order_number, status, address, items, total_points, created_at, user_id')
+      .order('created_at', { ascending: false });
+    const { data, error } = companyId ? await q.eq('company_id', companyId) : await q;
+    if (error) _log('orders listForCompany error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+
+  async updateStatus(orderId, status) {
+    const { error } = await _sb.from('orders')
+      .update({ status })
+      .eq('id', orderId);
+    if (error) _log('orders updateStatus error:', error.message);
+    return { isOk: !error };
   },
 };
 

@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   const body = await req.json().catch(() => ({}));
-  const { subject, message } = body;
+  const { subject, message, fromName, fromEmail } = body;
 
   if (!message) {
     return new Response(JSON.stringify({ error: 'message required' }), {
@@ -46,8 +46,9 @@ Deno.serve(async (req) => {
     });
   }
 
-  const userName    = profile?.name  || 'Usuario desconocido';
-  const userEmail   = profile?.email || user.email || '—';
+  // fromName/fromEmail override profile lookup (used when superadmin impersonates an employee)
+  const userName    = fromName  || profile?.name  || 'Usuario desconocido';
+  const userEmail   = fromEmail || profile?.email || user.email || '—';
   const userRole    = profile?.role  || '—';
   const companyId   = profile?.company_id || '—';
   const subjectLine = subject || 'Consulta general';

@@ -35,10 +35,9 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { user_id } = body;
 
-    // Users can only read their own notifications
-    if (!user_id || user_id !== user.id) {
-      return new Response(JSON.stringify({ error: 'Forbidden' }), {
-        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    if (!user_id) {
+      return new Response(JSON.stringify({ error: 'user_id required' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
@@ -46,6 +45,17 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
+
+    // Allow superadmins to fetch any user's notifications (needed for impersonation)
+    if (user_id !== user.id) {
+      const { data: profile } = await adminClient
+        .from('profiles').select('role').eq('id', user.id).maybeSingle();
+      if (profile?.role !== 'superadmin') {
+        return new Response(JSON.stringify({ error: 'Forbidden' }), {
+          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
 
     const { data, error } = await adminClient
       .from('notifications')

@@ -59,6 +59,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
   <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.js"></script>
+  <script src="https://js.hcaptcha.com/1/api.js" async defer></script>
 </head>
 <body class="h-full bg-gray-50">
 
@@ -104,6 +105,11 @@
             <span class="text-gray-600">Recuérdame</span>
           </label>
           <a href="#" onclick="openForgotPassword(); return false;" class="text-celeste-600 hover:text-celeste-700 font-medium transition">¿Olvidaste tu contraseña?</a>
+        </div>
+
+        <!-- hCaptcha widget -->
+        <div class="flex justify-center">
+          <div class="h-captcha" data-sitekey="TU_SITE_KEY_AQUI" id="hcaptcha-widget"></div>
         </div>
 
         <div id="login-error" class="hidden p-3 rounded-lg bg-red-50 border border-red-200">
@@ -155,7 +161,7 @@
       <!-- Logo -->
       <div class="flex items-center gap-2 shrink-0">
         <img src="img/img/allay-logo.png" alt="Allay" class="h-12 object-contain cursor-pointer hover:opacity-80 transition"
-             onclick="closeAdminPage(); closeProfilePage(); closeAnalyticsPage(); switchPage('home');">
+             onclick="_closeAllOverlays(); closeAdminPage(); closeProfilePage(); closeAnalyticsPage(); switchPage('home');">
       </div>
 
       <!-- Search -->
@@ -252,8 +258,12 @@
               onclick="openNotificationsPage(); document.getElementById('profile-dropdown').classList.add('hidden');">
               <i data-lucide="bell" class="w-4 h-4 text-violet-500"></i> Notificaciones
             </button>
-            <a href="#" class="flex items-center gap-3 px-4 py-2.5 hover:bg-violet-50 text-sm text-gray-700 transition" onclick="event.preventDefault()">
-              <i data-lucide="shopping-bag" class="w-4 h-4 text-violet-500"></i> Carrito de compras
+            <a href="#" class="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-violet-50 text-sm text-gray-700 transition"
+               onclick="event.preventDefault(); openCartPage(); document.getElementById('profile-dropdown').classList.add('hidden');">
+              <span class="flex items-center gap-3">
+                <i data-lucide="shopping-cart" class="w-4 h-4 text-violet-500"></i> Carrito de compras
+              </span>
+              <span id="cart-badge-dropdown" class="hidden text-[10px] font-bold bg-[#f19ac4] text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center"></span>
             </a>
             <div class="border-t border-gray-100 mt-1 pt-1">
               <a href="#" class="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 text-sm text-red-600 transition" onclick="event.preventDefault(); logout();">
@@ -655,7 +665,7 @@
       </button>
     </div>
   </div>
-  <div class="flex-1 p-4 md:p-6 max-w-5xl mx-auto w-full">
+  <div class="flex-1 p-4 md:p-6 w-full">
     <div class="bg-violet-50 border border-violet-100 rounded-2xl px-5 py-4 mb-5 flex items-start gap-3">
       <i data-lucide="lightbulb" class="w-4 h-4 text-violet-400 shrink-0 mt-0.5"></i>
       <p class="text-sm text-violet-700 leading-relaxed">
@@ -898,6 +908,29 @@
     <div class="flex gap-3 pt-1">
       <button onclick="closeDeleteRecognitionModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
       <button onclick="confirmDeleteRecognition()" class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     DELETE COMMENT CONFIRM MODAL
+══════════════════════════════════════ -->
+<div id="delete-comment-modal" class="hidden fixed inset-0 z-[500] flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeDeleteCommentModal()"></div>
+  <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+        <i data-lucide="trash-2" class="w-5 h-5 text-red-500"></i>
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-gray-800">Eliminar comentario</h3>
+        <p class="text-xs text-gray-500 mt-0.5">Esta acción no se puede deshacer</p>
+      </div>
+    </div>
+    <p class="text-sm text-gray-600">¿Estás seguro que querés eliminar este comentario?</p>
+    <div class="flex gap-3 pt-1">
+      <button onclick="closeDeleteCommentModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
+      <button onclick="confirmDeleteComment()" class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition">Eliminar</button>
     </div>
   </div>
 </div>
@@ -1378,7 +1411,7 @@
     <button onclick="adminScrollTo('admin-section-ar')" class="admin-qnav-btn shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
       <i data-lucide="calendar-heart" class="w-3.5 h-3.5"></i> Reconocimientos automáticos
     </button>
-    <button id="qnav-audit" onclick="adminScrollTo('superadmin-audit-section')" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
+    <button id="qnav-audit" onclick="openAuditPage()" class="admin-qnav-btn hidden shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gray-600 hover:bg-violet-50 hover:text-violet-600 transition whitespace-nowrap border border-gray-200">
       <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> Auditoría
     </button>
   </div>
@@ -1730,33 +1763,41 @@
     <!-- Add test user modal -->
 
     <!-- Audit Log (superadmin only) -->
-    <div id="superadmin-audit-section" class="hidden bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mt-6">
-      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center shrink-0">
-            <i data-lucide="shield-check" class="w-5 h-5 text-violet-500"></i>
-          </div>
-          <div>
-            <h2 class="text-base font-bold text-gray-800">Registro de auditoría</h2>
-            <p class="text-xs text-gray-400">Historial de acciones administrativas en la plataforma</p>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <select id="audit-filter-action" onchange="loadAuditLog()" class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-300">
-            <option value="">Todas las acciones</option>
-            <option value="user.create">Usuarios creados</option>
-            <option value="user.delete">Usuarios eliminados</option>
-            <option value="role.change">Cambios de rol</option>
-            <option value="csv.approve">CSV aprobados</option>
-            <option value="csv.reject">CSV rechazados</option>
-            <option value="recognition.delete">Reconocimientos eliminados</option>
-            <option value="comment.delete">Comentarios eliminados</option>
-          </select>
-          <button onclick="loadAuditLog()" class="flex items-center gap-1.5 text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-lg transition">
-            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Actualizar
-          </button>
-        </div>
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════
+     AUDIT LOG PAGE (superadmin only)
+══════════════════════════════════════ -->
+<div id="audit-page" class="hidden fixed inset-0 z-[45] bg-gray-50 overflow-y-auto flex flex-col h-full w-full">
+  <nav class="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm">
+    <div class="flex items-center gap-3 px-4 md:px-6 h-16">
+      <button onclick="closeAuditPage()" class="p-2 rounded-full hover:bg-gray-100 transition">
+        <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+      </button>
+      <div class="flex-1">
+        <h2 class="text-lg font-bold text-gray-800">Registro de auditoría</h2>
+        <p class="text-xs text-gray-400">Historial de acciones administrativas en la plataforma</p>
       </div>
+      <div class="flex items-center gap-2">
+        <select id="audit-filter-action" onchange="loadAuditLog()" class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-300">
+          <option value="">Todas las acciones</option>
+          <option value="user.create">Usuarios creados</option>
+          <option value="user.delete">Usuarios eliminados</option>
+          <option value="role.change">Cambios de rol</option>
+          <option value="csv.approve">CSV aprobados</option>
+          <option value="csv.reject">CSV rechazados</option>
+          <option value="recognition.delete">Reconocimientos eliminados</option>
+          <option value="comment.delete">Comentarios eliminados</option>
+        </select>
+        <button onclick="loadAuditLog()" class="flex items-center gap-1.5 text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-lg transition">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Actualizar
+        </button>
+      </div>
+    </div>
+  </nav>
+  <main class="flex-1 px-4 md:px-6 py-6 max-w-4xl mx-auto w-full">
+    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
       <div id="audit-log-list" class="divide-y divide-gray-50">
         <p class="text-center py-8 text-gray-400 text-sm">Cargando...</p>
       </div>
@@ -1770,7 +1811,6 @@
         </button>
       </div>
     </div>
-
   </main>
 </div>
 
@@ -1789,15 +1829,142 @@
         </button>
         <h2 class="text-base font-bold text-gray-800">Mis beneficios</h2>
       </div>
-      <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-50 border border-violet-200">
-        <i data-lucide="coins" class="w-4 h-4 text-violet-600"></i>
-        <span id="store-points-display" class="text-sm font-bold text-violet-700">0 puntos</span>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-50 border border-violet-200">
+          <i data-lucide="coins" class="w-4 h-4 text-violet-600"></i>
+          <span id="store-points-display" class="text-sm font-bold text-violet-700">0 puntos</span>
+        </div>
+        <button onclick="openOrdersPage()" title="Mis pedidos" class="p-2 rounded-full hover:bg-gray-100 transition">
+          <i data-lucide="package" class="w-5 h-5 text-gray-500"></i>
+        </button>
+        <button onclick="openCartPage()" class="relative p-2 rounded-full hover:bg-gray-100 transition">
+          <i data-lucide="shopping-cart" class="w-5 h-5 text-gray-600"></i>
+          <span id="cart-badge-store" class="hidden absolute -top-1 -right-1 text-[9px] font-bold bg-[#f19ac4] text-white rounded-full w-4 h-4 flex items-center justify-center"></span>
+        </button>
       </div>
     </div>
   </nav>
   <div class="flex-1 p-4 md:p-6 w-full">
     <div id="store-hero-block" class="mb-6"></div>
     <div id="store-rewards-container"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     CART PAGE
+══════════════════════════════════════ -->
+<div id="cart-page" class="hidden fixed inset-x-0 bottom-0 top-16 z-[110] flex flex-col bg-gray-50">
+
+  <!-- Header -->
+  <div class="bg-white border-b border-gray-100 shadow-sm sticky top-0 z-10">
+    <div class="flex items-center justify-between px-6 py-4">
+      <div class="flex items-center gap-3">
+        <button onclick="closeCartPage()" class="p-2 rounded-lg hover:bg-gray-100 transition">
+          <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+        </button>
+        <h1 class="text-xl font-bold text-gray-800">Mi carrito</h1>
+      </div>
+      <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-50 border border-violet-200">
+        <i data-lucide="coins" class="w-4 h-4 text-violet-600"></i>
+        <span id="cart-points-display" class="text-sm font-bold text-violet-700">0 puntos</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="flex-1 overflow-y-auto">
+    <div class="max-w-2xl mx-auto w-full p-6 space-y-4">
+      <div id="cart-items-container"></div>
+    </div>
+  </div>
+
+  <!-- Footer: resumen + checkout -->
+  <div id="cart-footer" class="hidden bg-white border-t border-gray-100 shadow-lg px-6 py-4">
+    <div class="max-w-2xl mx-auto space-y-3">
+      <div class="flex items-center justify-between text-sm text-gray-500">
+        <span>Puntos disponibles</span>
+        <span id="cart-available-pts" class="font-semibold text-violet-700">0</span>
+      </div>
+      <div class="flex items-center justify-between text-sm text-gray-500">
+        <span>Total del carrito</span>
+        <span id="cart-total-pts" class="font-semibold text-gray-800">0</span>
+      </div>
+      <div class="flex items-center justify-between font-bold text-base border-t border-gray-100 pt-3">
+        <span>Puntos restantes</span>
+        <span id="cart-remaining-pts" class="text-[#3d2b56]">0</span>
+      </div>
+      <button onclick="openCheckout()" id="cart-checkout-btn"
+        class="w-full py-3 rounded-xl bg-[#3d2b56] text-white font-bold text-sm hover:bg-[#2e1f42] transition flex items-center justify-center gap-2">
+        <i data-lucide="arrow-right" class="w-4 h-4"></i> Finalizar compra
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════
+     ORDERS PAGE
+══════════════════════════════════════ -->
+<div id="orders-page" class="hidden fixed inset-0 bg-gray-50 flex flex-col">
+
+  <!-- Header -->
+  <div class="bg-white border-b border-gray-100 shadow-sm sticky top-0 z-10 shrink-0">
+    <div class="flex items-center justify-between px-4 md:px-6 h-16">
+      <div class="flex items-center gap-3">
+        <button onclick="closeOrdersPage()" class="p-2 rounded-full hover:bg-gray-100 transition">
+          <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+        </button>
+        <h2 id="orders-page-title" class="text-base font-bold text-gray-800">Mis pedidos</h2>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="flex-1 overflow-y-auto">
+    <div id="orders-list-container" class="max-w-2xl mx-auto w-full p-4 md:p-6 space-y-4"></div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════
+     CHECKOUT OVERLAY
+══════════════════════════════════════ -->
+<div id="checkout-overlay" class="hidden fixed inset-0 z-[200] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div class="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl flex flex-col shadow-2xl" style="max-height:90vh;">
+
+    <!-- Header -->
+    <div class="px-6 pt-5 pb-4 border-b border-gray-100 shrink-0">
+      <div class="flex items-center justify-between mb-4">
+        <button id="checkout-back-btn" onclick="checkoutBack()"
+          class="p-2 rounded-full hover:bg-gray-100 transition invisible">
+          <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+        </button>
+        <h2 id="checkout-title" class="text-base font-bold text-gray-800">Datos de envío</h2>
+        <button onclick="closeCheckout()" class="p-2 rounded-full hover:bg-gray-100 transition">
+          <i data-lucide="x" class="w-5 h-5 text-gray-400"></i>
+        </button>
+      </div>
+      <!-- Step bar -->
+      <div class="flex items-center gap-2">
+        <div id="step-bar-1" class="flex-1 h-1 rounded-full bg-[#3d2b56] transition-all"></div>
+        <div id="step-bar-2" class="flex-1 h-1 rounded-full bg-gray-200 transition-all"></div>
+        <div id="step-bar-3" class="flex-1 h-1 rounded-full bg-gray-200 transition-all"></div>
+      </div>
+      <p id="checkout-step-label" class="text-xs text-gray-400 mt-2">Paso 1 de 3</p>
+    </div>
+
+    <!-- Content (scrollable) -->
+    <div id="checkout-content" class="flex-1 overflow-y-auto px-6 py-5"></div>
+
+    <!-- Footer -->
+    <div class="px-6 py-4 border-t border-gray-100 shrink-0">
+      <button id="checkout-next-btn" onclick="checkoutNext()"
+        class="w-full py-3 rounded-xl bg-[#3d2b56] text-white font-bold text-sm hover:bg-[#2e1f42] transition flex items-center justify-center gap-2">
+        <span id="checkout-next-label">Continuar</span>
+        <i data-lucide="arrow-right" class="w-4 h-4"></i>
+      </button>
+    </div>
+
   </div>
 </div>
 
@@ -1831,6 +1998,34 @@
 </div>
 
 <!-- ══════════════════════════════════════
+     NOTIFICATION SETTINGS MODAL
+══════════════════════════════════════ -->
+<div id="notif-settings-modal" class="hidden fixed inset-0 z-[210] flex items-end sm:items-center justify-center p-0 sm:p-4" style="background:rgba(30,20,50,.5);backdrop-filter:blur(3px)">
+  <div class="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl flex flex-col shadow-2xl" style="max-height:85vh">
+    <div class="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 shrink-0">
+      <div>
+        <h2 class="text-base font-bold text-gray-900">Preferencias de notificaciones</h2>
+        <p class="text-xs text-gray-400 mt-0.5">Elegí qué notificaciones querés recibir</p>
+      </div>
+      <button onclick="closeNotifSettings()" class="p-2 rounded-full hover:bg-gray-100 transition text-gray-400 hover:text-gray-600">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+    <div class="overflow-y-auto flex-1 px-6">
+      <div class="flex items-center justify-end gap-6 py-3 border-b border-gray-100">
+        <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wide w-16 text-center">Plataforma</span>
+        <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wide w-16 text-center">Email</span>
+      </div>
+      <div id="notif-settings-body" class="divide-y divide-gray-50"></div>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 shrink-0 flex gap-3">
+      <button onclick="closeNotifSettings()" class="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
+      <button onclick="saveNotifPrefs()" class="flex-1 py-2.5 rounded-xl bg-[#3d2b56] text-white text-sm font-semibold hover:bg-[#2e1f42] transition">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
      USER PROFILE PAGE
 ══════════════════════════════════════ -->
 <div id="user-profile-page" class="hidden fixed z-[48] bg-gray-50 overflow-y-auto flex flex-col">
@@ -1846,7 +2041,7 @@
   </div>
 
   <!-- Content -->
-  <div class="flex-1 px-6 py-6 max-w-3xl mx-auto w-full space-y-5">
+  <div class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full space-y-5">
 
     <!-- Avatar + nombre -->
     <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-5">
@@ -1891,46 +2086,57 @@
 
       <!-- Bio -->
       <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-bold text-gray-700">Sobre mí</h3>
-          <span id="up-bio-saved" class="text-[10px] text-green-500 font-semibold hidden">Guardado</span>
-        </div>
+        <h3 class="text-sm font-bold text-gray-700 mb-3">Sobre mí</h3>
         <textarea id="up-bio" rows="3" maxlength="250"
           placeholder="Contá algo sobre vos: quién sos, qué te mueve, qué traés al equipo..."
-          onblur="saveAboutMe()" oninput="updateAboutMeCounter(this,'up-bio-count',250)"
+          oninput="updateAboutMeCounter(this,'up-bio-count',250)"
           class="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none leading-relaxed"></textarea>
-        <p class="text-[10px] text-gray-300 text-right mt-1"><span id="up-bio-count">0</span>/250</p>
+        <div class="flex items-center justify-between mt-2">
+          <p class="text-[10px] text-gray-300"><span id="up-bio-count">0</span>/250</p>
+          <div class="flex items-center gap-3">
+            <span id="up-saved-bio" class="text-xs text-green-500 font-semibold hidden flex items-center gap-1">✓ Guardado</span>
+            <button id="up-save-bio" onclick="saveAboutMeField('bio')" class="px-4 py-1.5 bg-[#3d2b56] text-white text-xs font-semibold rounded-xl hover:bg-[#2e1f42] transition">Guardar</button>
+          </div>
+        </div>
       </div>
 
       <!-- Intereses -->
       <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-        <div class="flex items-center justify-between mb-3">
-          <div>
-            <h3 class="text-sm font-bold text-gray-700">Intereses y hobbies</h3>
-            <p class="text-[10px] text-gray-400 mt-0.5">Separalos con · o coma</p>
-          </div>
+        <div class="mb-3">
+          <h3 class="text-sm font-bold text-gray-700">Intereses y hobbies</h3>
+          <p class="text-[10px] text-gray-400 mt-0.5">Separalos con · o coma</p>
         </div>
         <textarea id="up-interests" rows="2" maxlength="150"
           placeholder="Fotografía · Música · Senderismo · Tecnología..."
-          onblur="saveAboutMe()" oninput="updateAboutMeCounter(this,'up-interests-count',150)"
+          oninput="updateAboutMeCounter(this,'up-interests-count',150)"
           class="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"></textarea>
-        <p class="text-[10px] text-gray-300 text-right mt-1"><span id="up-interests-count">0</span>/150</p>
+        <div class="flex items-center justify-between mt-2">
+          <p class="text-[10px] text-gray-300"><span id="up-interests-count">0</span>/150</p>
+          <div class="flex items-center gap-3">
+            <span id="up-saved-interests" class="text-xs text-green-500 font-semibold hidden flex items-center gap-1">✓ Guardado</span>
+            <button id="up-save-interests" onclick="saveAboutMeField('interests')" class="px-4 py-1.5 bg-[#3d2b56] text-white text-xs font-semibold rounded-xl hover:bg-[#2e1f42] transition">Guardar</button>
+          </div>
+        </div>
         <div id="up-interests-tags" class="flex flex-wrap gap-1.5 mt-2"></div>
       </div>
 
       <!-- Forma de trabajo -->
       <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-        <div class="flex items-center justify-between mb-3">
-          <div>
-            <h3 class="text-sm font-bold text-gray-700">Forma de trabajo</h3>
-            <p class="text-[10px] text-gray-400 mt-0.5">¿Cómo te definirías como compañero?</p>
-          </div>
+        <div class="mb-3">
+          <h3 class="text-sm font-bold text-gray-700">Forma de trabajo</h3>
+          <p class="text-[10px] text-gray-400 mt-0.5">¿Cómo te definirías como compañero?</p>
         </div>
         <textarea id="up-workstyle" rows="2" maxlength="150"
           placeholder="Colaborativo · Detallista · Orientado a resultados · Me gusta el trabajo profundo..."
-          onblur="saveAboutMe()" oninput="updateAboutMeCounter(this,'up-workstyle-count',150)"
+          oninput="updateAboutMeCounter(this,'up-workstyle-count',150)"
           class="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"></textarea>
-        <p class="text-[10px] text-gray-300 text-right mt-1"><span id="up-workstyle-count">0</span>/150</p>
+        <div class="flex items-center justify-between mt-2">
+          <p class="text-[10px] text-gray-300"><span id="up-workstyle-count">0</span>/150</p>
+          <div class="flex items-center gap-3">
+            <span id="up-saved-workstyle" class="text-xs text-green-500 font-semibold hidden flex items-center gap-1">✓ Guardado</span>
+            <button id="up-save-workstyle" onclick="saveAboutMeField('workstyle')" class="px-4 py-1.5 bg-[#3d2b56] text-white text-xs font-semibold rounded-xl hover:bg-[#2e1f42] transition">Guardar</button>
+          </div>
+        </div>
         <div id="up-workstyle-tags" class="flex flex-wrap gap-1.5 mt-2"></div>
       </div>
 
@@ -2039,13 +2245,13 @@
             <button id="up-filter-given"    onclick="setUpFilter('given')"    class="up-filter-btn px-3 py-1 rounded-lg text-xs font-semibold transition text-gray-500">Dados</button>
           </div>
         </div>
-        <div id="up-feed" class="space-y-3">
+        <div id="up-feed" class="space-y-2">
           <p class="text-xs text-gray-400">Cargando...</p>
         </div>
       </div>
 
       <!-- Conexiones (columna lateral compacta) -->
-      <div class="w-44 shrink-0 bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+      <div class="w-64 shrink-0 bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
         <h2 class="text-xs font-bold text-gray-600 flex items-center gap-1.5 mb-3">
           <i data-lucide="network" class="w-3.5 h-3.5 text-[#3d2b56]"></i> Conexiones
         </h2>
@@ -2075,7 +2281,7 @@
   </div>
 
   <!-- Content -->
-  <div class="flex-1 px-6 py-6 max-w-3xl mx-auto w-full space-y-5">
+  <div class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full space-y-5">
 
     <!-- Avatar + nombre + reconocer -->
     <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-5">
@@ -2151,7 +2357,7 @@
         </div>
       </div>
       <!-- Conexiones -->
-      <div class="w-44 shrink-0 bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+      <div class="w-64 shrink-0 bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
         <h2 class="text-xs font-bold text-gray-600 flex items-center gap-1.5 mb-3">
           <i data-lucide="network" class="w-3.5 h-3.5 text-[#3d2b56]"></i> Conexiones
         </h2>
@@ -2798,23 +3004,21 @@
 
   <!-- Contact tab -->
   <div id="support-contact" class="hidden overflow-y-auto flex-1 p-4 space-y-3">
-    <p class="text-xs text-gray-500">Completá el formulario y te respondemos a la brevedad.</p>
+    <p class="text-xs text-gray-500">Respondé las preguntas y te ayudamos a la brevedad.</p>
     <div>
-      <label class="text-xs font-semibold text-gray-600 block mb-1">Asunto</label>
-      <select id="support-subject" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 text-gray-700">
-        <option value="Problema técnico">Problema técnico</option>
-        <option value="Cómo usar la plataforma">Cómo usar la plataforma</option>
-        <option value="Gestión de cuenta">Gestión de cuenta</option>
-        <option value="Facturación o planes">Facturación o planes</option>
-        <option value="Sugerencia">Sugerencia</option>
-        <option value="Otro">Otro</option>
+      <label class="text-xs font-semibold text-gray-600 block mb-1">¿Sobre qué es tu consulta?</label>
+      <select id="support-subject" onchange="_renderContactForm(this.value)"
+        class="w-full text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 text-gray-700">
+        <option value="Problema técnico">🐛 Problema técnico</option>
+        <option value="Cómo usar la plataforma">📖 Cómo usar la plataforma</option>
+        <option value="Gestión de cuenta">👤 Gestión de cuenta</option>
+        <option value="Store o canjes">🛍️ Store o canjes</option>
+        <option value="Sugerencia">💡 Sugerencia</option>
+        <option value="Otro">💬 Otro</option>
       </select>
     </div>
-    <div>
-      <label class="text-xs font-semibold text-gray-600 block mb-1">Mensaje</label>
-      <textarea id="support-message" rows="4" placeholder="Describí tu consulta con el mayor detalle posible..."
-        class="w-full text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"></textarea>
-    </div>
+    <!-- Dynamic fields rendered by JS -->
+    <div id="support-contact-fields" class="space-y-3"></div>
     <button onclick="submitSupportForm()"
       class="w-full py-2.5 bg-[#3d2b56] text-white text-sm font-semibold rounded-xl hover:bg-violet-900 transition flex items-center justify-center gap-2">
       <i data-lucide="send" class="w-3.5 h-3.5"></i> Enviar consulta
@@ -3279,7 +3483,7 @@
   </div>
 </div>
 
-<script src="js/app.js?v=176"></script>
+<script src="js/app.js?v=210"></script>
 <script src="js/analytics.js?v=12"></script>
 </body>
 </html>

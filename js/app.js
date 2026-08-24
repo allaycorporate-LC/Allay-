@@ -58,7 +58,8 @@ function _applySidebarState() {
 function _closeAllOverlays() {
   const ids = ['profile-page','admin-page','analytics-page','store-page',
                 'notifications-page','programs-page','approvals-page','points-page',
-                'user-profile-page','other-profile-page','superadmin-ar-page'];
+                'user-profile-page','other-profile-page','superadmin-ar-page',
+                'cart-page','orders-page'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.classList.add('hidden'); el.style.display = 'none'; }
@@ -92,7 +93,7 @@ function _positionOverlayPage(pageId) {
 
 function _repositionVisibleOverlays() {
   const ids = ['profile-page','admin-page','analytics-page','store-page',
-                'notifications-page','programs-page','approvals-page','points-page'];
+                'notifications-page','programs-page','approvals-page','points-page','cart-page','orders-page'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el && !el.classList.contains('hidden') && el.style.display !== 'none') {
@@ -200,13 +201,21 @@ async function handleLogin(e) {
     return;
   }
 
+  // Verificar hCaptcha
+  const captchaToken = typeof hcaptcha !== 'undefined' ? hcaptcha.getResponse() : null;
+  if (typeof hcaptcha !== 'undefined' && !captchaToken) {
+    errorText.textContent = 'Por favor completá la verificación de seguridad';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
   loginBtn.disabled = true;
   const originalHTML = loginBtn.innerHTML;
   loginBtn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> <span>Verificando...</span>';
   lucide.createIcons();
 
   try {
-    const { isOk, error: authError } = await window.authSdk.login(email, password);
+    const { isOk, error: authError } = await window.authSdk.login(email, password, captchaToken);
 
     if (!isOk) {
       errorText.textContent = authError?.message === 'Invalid login credentials'
@@ -216,6 +225,7 @@ async function handleLogin(e) {
       loginBtn.disabled = false;
       loginBtn.innerHTML = originalHTML;
       lucide.createIcons();
+      if (typeof hcaptcha !== 'undefined') hcaptcha.reset();
       return;
     }
 
@@ -288,9 +298,11 @@ async function handleLogin(e) {
       loadCurrentCompanySettings();
       _setupFeedRealtime();
       _setupCommentsRealtime();
+      _setupNotificationsRealtime();
       renderWeeklyRecap();
       _applySidebarState();
       _initSidebarTooltip();
+      _loadCart();
       showSuccessToast(`¡Bienvenido, ${currentUser.name}!`);
       lucide.createIcons();
       setTimeout(() => _checkOnboarding(), 700);
@@ -333,9 +345,23 @@ async function sendPasswordReset() {
   }
 
   btn.disabled = true;
-  btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Enviando...';
+  btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Verificando...';
   lucide.createIcons({ nodes: [btn] });
   errorDiv.classList.add('hidden');
+
+  // Verificar si el mail tiene cuenta antes de enviar el reset
+  const { data: exists, error: checkErr } = await _sb.rpc('check_email_exists', { p_email: email });
+  if (!checkErr && exists === false) {
+    btn.disabled = false;
+    btn.innerHTML = '<i data-lucide="send" class="w-4 h-4"></i> Enviar link de recuperación';
+    lucide.createIcons({ nodes: [btn] });
+    errorText.textContent = 'No encontramos ninguna cuenta con ese email. Verificá la dirección.';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Enviando...';
+  lucide.createIcons({ nodes: [btn] });
 
   const redirectTo = window.location.origin + window.location.pathname;
   const { error } = await window._sbAuth.resetPasswordForEmail(email, { redirectTo });
@@ -2162,7 +2188,6 @@ function toggleNotificationsDropdown(e) {
 function toggleNotifications(e) { toggleNotificationsDropdown(e); }
 
 function openNotificationsPage() {
-  closeAnalyticsPage();
   currentPage = 'notifications';
   const np = document.getElementById('notifications-page');
   np.style.display = '';
@@ -2172,9 +2197,70 @@ function openNotificationsPage() {
   renderNotificationsPage();
 }
 
+// ── Notification preferences ──────────────────────────────────────────────────
+const _NOTIF_CATS = [
+  { key: 'reconocimientos', label: 'Reconocimientos',          emoji: '🏆', desc: 'Cuando alguien te reconoce' },
+  { key: 'comentarios',     label: 'Comentarios y reacciones', emoji: '💬', desc: 'Cuando alguien comenta o reacciona en tu reconocimiento' },
+  { key: 'canjes',          label: 'Canjes del Store',         emoji: '🛍️', desc: 'Actualizaciones del estado de tus pedidos' },
+  { key: 'anuncios',        label: 'Anuncios',                 emoji: '📢', desc: 'Comunicados y novedades de tu empresa' },
+  { key: 'programas',       label: 'Programas',                emoji: '🎯', desc: 'Aprobaciones y cambios de estado de programas' },
+];
+const _NOTIF_DEFAULTS = Object.fromEntries(_NOTIF_CATS.map(c => [c.key, { platform: true, email: true }]));
+
+function _getNotifPrefs() {
+  const saved = currentUser?.notif_prefs || {};
+  return Object.fromEntries(_NOTIF_CATS.map(c => [c.key, { ..._NOTIF_DEFAULTS[c.key], ...(saved[c.key] || {}) }]));
+}
+
+let _notifPrefsBuffer = null;
+
 function openNotificationSettings() {
-  closeNotificationsPage();
-  openProfilePage();
+  _notifPrefsBuffer = _getNotifPrefs();
+  const prefs = _notifPrefsBuffer;
+  const rows = _NOTIF_CATS.map(cat => {
+    const p = prefs[cat.key];
+    const toggle = (key, type, checked) => `
+      <div class="relative w-9 h-5 shrink-0">
+        <input type="checkbox" id="np-${key}-${type}" ${checked ? 'checked' : ''} class="sr-only peer"
+          onchange="_notifPrefsBuffer['${key}']['${type}']=this.checked">
+        <div class="absolute inset-0 bg-gray-200 rounded-full peer-checked:bg-[#3d2b56] transition cursor-pointer" onclick="document.getElementById('np-${key}-${type}').click()"></div>
+        <div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition peer-checked:translate-x-4 pointer-events-none"></div>
+      </div>`;
+    return `
+      <div class="py-3.5">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-semibold text-gray-800">${cat.emoji} ${cat.label}</p>
+            <p class="text-xs text-gray-400 mt-0.5 leading-snug">${cat.desc}</p>
+          </div>
+          <div class="flex items-center gap-6 shrink-0">
+            <div class="w-16 flex justify-center">${toggle(cat.key, 'platform', p.platform)}</div>
+            <div class="w-16 flex justify-center">${toggle(cat.key, 'email', p.email)}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  document.getElementById('notif-settings-body').innerHTML = rows;
+  document.getElementById('notif-settings-modal').classList.remove('hidden');
+  lucide.createIcons();
+}
+
+function closeNotifSettings() {
+  document.getElementById('notif-settings-modal')?.classList.add('hidden');
+  _notifPrefsBuffer = null;
+}
+
+async function saveNotifPrefs() {
+  if (!currentUser || !_notifPrefsBuffer) return;
+  currentUser.notif_prefs = { ...(_notifPrefsBuffer) };
+  _notifPrefsBuffer = null;
+  const result = await window.dataSdk.update(currentUser);
+  if (result.isOk) {
+    showSuccessToast('Preferencias guardadas');
+    document.getElementById('notif-settings-modal')?.classList.add('hidden');
+  } else {
+    showErrorToast('Error al guardar preferencias');
+  }
 }
 
 function closeNotificationsPage() {
@@ -2437,24 +2523,35 @@ function _loadAboutMe() {
 }
 
 function saveAboutMe() {
+  saveAboutMeField('bio');
+  saveAboutMeField('interests');
+  saveAboutMeField('workstyle');
+}
+
+async function saveAboutMeField(field) {
   if (!currentUser) return;
-  const get = id => document.getElementById(id)?.value?.trim() || '';
-  const bio        = get('up-bio');
-  const interests  = get('up-interests');
-  const work_style = get('up-workstyle');
+  const fieldMap = { bio: 'bio', interests: 'interests', workstyle: 'work_style' };
+  const dbField  = fieldMap[field];
+  if (!dbField) return;
 
-  // Update in-memory
-  currentUser.bio        = bio        || null;
-  currentUser.interests  = interests  || null;
-  currentUser.work_style = work_style || null;
+  const value = document.getElementById(`up-${field}`)?.value?.trim() || '';
+  currentUser[dbField] = value || null;
 
-  // Persist to Supabase
-  window.dataSdk.update({ ...currentUser, bio, interests, work_style }).catch(() => {});
+  if (field === 'interests') _renderAboutMeTags('up-interests', 'up-interests-tags');
+  if (field === 'workstyle') _renderAboutMeTags('up-workstyle', 'up-workstyle-tags');
 
-  _renderAboutMeTags('up-interests', 'up-interests-tags');
-  _renderAboutMeTags('up-workstyle',  'up-workstyle-tags');
-  const s = document.getElementById('up-bio-saved');
-  if (s) { s.classList.remove('hidden'); setTimeout(() => s.classList.add('hidden'), 1800); }
+  const btn      = document.getElementById(`up-save-${field}`);
+  const savedMsg = document.getElementById(`up-saved-${field}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
+  const { isOk } = await window.dataSdk.update({ ...currentUser }).catch(() => ({ isOk: false }));
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; }
+  if (isOk && savedMsg) {
+    savedMsg.classList.remove('hidden');
+    setTimeout(() => savedMsg.classList.add('hidden'), 2000);
+  }
+  if (!isOk) showErrorToast('No se pudo guardar, intentá de nuevo');
 }
 
 function setRecognitionPref(type, value) {
@@ -2628,20 +2725,24 @@ function _renderUpFeed() {
     const imgsEl = msgImgs.length
       ? msgImgs.map(url => `<img src="${esc(url)}" class="mt-2 rounded-lg max-h-40 max-w-full object-cover" loading="lazy">`).join('')
       : '';
-    return `<div class="flex items-start gap-3 py-3 border-b border-gray-50 last:border-0">
-      <div class="w-9 h-9 rounded-full ${getAvatarColor(other)} flex items-center justify-center text-white text-sm font-bold shrink-0">${esc(otherInitial)}</div>
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 flex-wrap">
-          <p class="text-sm text-gray-600">${label}</p>
-          ${badge}
+    const hasImg = msgImgs.length > 0;
+    return `<div class="rounded-xl border border-gray-100 bg-gray-50 hover:bg-gray-100/60 transition overflow-hidden">
+      <div class="flex items-start gap-3 p-3">
+        <div class="w-9 h-9 rounded-full ${getAvatarColor(other)} flex items-center justify-center text-white text-sm font-bold shrink-0">${esc(otherInitial)}</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <p class="text-sm text-gray-600 leading-snug">${label}</p>
+            ${badge}
+          </div>
+          <div class="flex items-center gap-2 mt-0.5">
+            <p class="text-xs text-[#3d2b56] font-medium">${esc(program)}</p>
+            ${pointsBadge}
+          </div>
+          ${messageEl}
+          ${!hasImg ? `<p class="text-xs text-gray-400 mt-1">${time}</p>` : ''}
         </div>
-        <div class="flex items-center gap-2 mt-0.5">
-          <p class="text-xs text-[#3d2b56] font-medium">${esc(program)}</p>
-          ${pointsBadge}
-        </div>
-        ${messageEl}${imgsEl}
-        <p class="text-xs text-gray-400 mt-1">${time}</p>
       </div>
+      ${hasImg ? `<div class="w-full">${msgImgs.map(url => `<img src="${esc(url)}" class="w-full object-cover max-h-52" loading="lazy">`).join('')}</div><p class="text-xs text-gray-400 px-3 pb-2 pt-1">${time}</p>` : ''}
     </div>`;
   }).join('');
 }
@@ -2881,10 +2982,24 @@ function openAdmin() {
   updateAdminQuicknav();
   loadCompanyPrograms();
   renderAutoRecognitionsAdmin();
-  if (currentUser?.role === 'superadmin') { loadCompanies(); loadCsvRequests(); loadAuditLog(); }
+  if (currentUser?.role === 'superadmin') { loadCompanies(); loadCsvRequests(); }
   if (currentUser?.role === 'admin') { loadAdminCsvHistory(); }
 }
 function openAdminPage() { openAdmin(); }
+
+function openAuditPage() {
+  if (currentUser?.role !== 'superadmin') return;
+  _auditPage = 0;
+  const el = document.getElementById('audit-page');
+  el.classList.remove('hidden');
+  _positionOverlayPage('audit-page');
+  loadAuditLog();
+  lucide.createIcons();
+}
+
+function closeAuditPage() {
+  document.getElementById('audit-page').classList.add('hidden');
+}
 
 // ── Audit Log ─────────────────────────────────────────────────────────────────
 let _auditPage = 0;
@@ -3738,7 +3853,6 @@ function updateAdminVisibility() {
   else document.getElementById('points-nav-link')?.classList.remove('flex');
   document.getElementById('superadmin-companies-section')?.classList.toggle('hidden', !isSA);
   document.getElementById('superadmin-csv-requests-section')?.classList.toggle('hidden', !isSA);
-  document.getElementById('superadmin-audit-section')?.classList.toggle('hidden', !isSA);
   const isAdminOnly = isAdmin && !isSA;
   document.getElementById('admin-csv-history-section')?.classList.toggle('hidden', !isAdminOnly);
   document.body.classList.toggle('is-admin', isAdmin);
@@ -3796,6 +3910,7 @@ function impersonateEmployee(empBackendId) {
   _loadApprovals();
   _setupFeedRealtime();
   _setupCommentsRealtime();
+  _setupNotificationsRealtime();
   renderRecognitionBattery();
   lucide.createIcons();
 }
@@ -3830,6 +3945,7 @@ function returnToSuperadmin() {
   showSuccessToast(`Volviste a tu cuenta: ${currentUser.name}`);
   loadNotifications();
   _setupFeedRealtime();
+  _setupNotificationsRealtime();
   renderRecognitionBattery();
   lucide.createIcons();
   setTimeout(() => openAdmin(), 50);
@@ -4597,9 +4713,29 @@ function loadLessComments(btn) {
   if (window.lucide) lucide.createIcons({ nodes: [btn] });
 }
 
-async function deleteComment(commentId, btn) {
-  const commentEl = btn.closest('[data-comment-id], .flex.items-start');
-  const card      = btn.closest('article');
+let _deletingCommentId  = null;
+let _deletingCommentBtn = null;
+
+function deleteComment(commentId, btn) {
+  _deletingCommentId  = commentId;
+  _deletingCommentBtn = btn;
+  document.getElementById('delete-comment-modal').classList.remove('hidden');
+  lucide.createIcons();
+}
+
+function closeDeleteCommentModal() {
+  document.getElementById('delete-comment-modal').classList.add('hidden');
+  _deletingCommentId  = null;
+  _deletingCommentBtn = null;
+}
+
+async function confirmDeleteComment() {
+  const commentId = _deletingCommentId;
+  const btn       = _deletingCommentBtn;
+  closeDeleteCommentModal();
+
+  const commentEl = btn?.closest('[data-comment-id], .flex.items-start');
+  const card      = btn?.closest('article');
 
   // Optimistic removal
   if (commentEl) commentEl.remove();
@@ -4612,11 +4748,10 @@ async function deleteComment(commentId, btn) {
     const allC = JSON.parse(card.dataset.allComments || '[]');
     const idx  = commentId ? allC.findIndex(c => c.id === commentId) : -1;
     if (idx !== -1) allC.splice(idx, 1);
-    card.dataset.allComments  = JSON.stringify(allC);
+    card.dataset.allComments   = JSON.stringify(allC);
     const shownNow = card.querySelectorAll('.comments-list > div').length;
     card.dataset.shownComments = shownNow;
 
-    // If shown ≤ COMMENTS_INITIAL, hide or update the collapse button
     const CINIT  = 3;
     const verBtn = card.querySelector('.ver-mas-comments');
     if (verBtn) {
@@ -4778,6 +4913,10 @@ async function addComment(btn) {
 function switchPage(page) {
   currentPage = page;
 
+  if (page === 'home') {
+    document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   // Cerrar cualquier página overlay abierta
   ['admin-page', 'analytics-page', 'store-page', 'profile-page', 'notifications-page', 'programs-page', 'approvals-page', 'points-page'].forEach(id => {
     const el = document.getElementById(id);
@@ -4891,6 +5030,7 @@ let _feedRealtimeChannel     = null;
 let _feedRefreshTimer        = null;
 let _feedRealtimeSetupId     = 0;
 let _commentsRealtimeChannel = null;
+let _notifsRealtimeChannel   = null;
 
 function _debouncedFeedRefresh() {
   clearTimeout(_feedRefreshTimer);
@@ -4929,6 +5069,16 @@ function _setupCommentsRealtime() {
     _commentsRealtimeChannel = null;
   }
   _commentsRealtimeChannel = window.recognitionSdk.subscribeToComments(_handleRealtimeComment);
+}
+
+function _setupNotificationsRealtime() {
+  if (_notifsRealtimeChannel) {
+    window.notificationSdk.unsubscribeNotifications(_notifsRealtimeChannel);
+    _notifsRealtimeChannel = null;
+  }
+  const uid = currentUser?.__backendId;
+  if (!uid) return;
+  _notifsRealtimeChannel = window.notificationSdk.subscribeToNotifications(uid, loadNotifications);
 }
 
 function _handleRealtimeComment(payload) {
@@ -5320,10 +5470,7 @@ async function renderFeed(reset = true) {
 // ------------------------------------------------------------
 
 async function loadNotifications() {
-  // When impersonating, use the privileged endpoint to get the employee's notifications
-  const result = isImpersonating && currentUser?.__backendId
-    ? await window.notificationSdk.listForUser(currentUser.__backendId)
-    : await window.notificationSdk.list();
+  const result = await window.notificationSdk.listForUser(currentUser?.__backendId);
   _notificationsData = result.data || [];
   updateNotificationBadge();
   if (currentPage === 'notifications') renderNotificationsPage();
@@ -5343,7 +5490,8 @@ function renderNotificationsDropdown() {
     let icon, iconColor, text;
     if (n.type === 'recognition') {
       icon = 'heart'; iconColor = 'rose';
-      text = `<span class="font-semibold">${esc(fromName)}</span> te reconoció (+${Number(n.data?.points)} puntos)`;
+      const _pts1 = Number(n.data?.points);
+      text = `<span class="font-semibold">${esc(fromName)}</span> te reconoció${_pts1 > 0 ? ` (+${_pts1} puntos)` : ''}`;
     } else if (n.type === 'reaction') {
       icon = 'smile'; iconColor = 'violet';
       text = `<span class="font-semibold">${esc(fromName)}</span> reaccionó ${esc(n.data?.emoji)} a tu reconocimiento`;
@@ -5377,6 +5525,9 @@ function renderNotificationsDropdown() {
     } else if (n.type === 'csv_rejected') {
       icon = 'file-x'; iconColor = 'red';
       text = `Tu CSV <strong>${esc(n.data?.file_name || 'archivo')}</strong> fue rechazado`;
+    } else if (n.type === 'order_status_update') {
+      icon = 'package'; iconColor = 'violet';
+      text = `${n.data?.status_emoji || '📦'} Tu pedido${n.data?.order_number ? ` <strong>#${n.data.order_number}</strong>` : ''} cambió a <strong>${esc(n.data?.status_label || n.data?.status || '—')}</strong>`;
     } else {
       icon = 'message-circle'; iconColor = 'blue';
       text = `<span class="font-semibold">${esc(fromName)}</span> comentó en tu reconocimiento`;
@@ -5409,7 +5560,8 @@ function renderNotificationsPage() {
     let avatarContent, text;
     if (n.type === 'recognition') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${esc((fromName[0] || '?').toUpperCase())}</div>`;
-      text = `<span class="font-semibold">${esc(fromName)}</span> te reconoció con <strong>+${Number(n.data?.points)} puntos</strong> · ${esc(n.data?.program)}`;
+      const _pts2 = Number(n.data?.points);
+      text = `<span class="font-semibold">${esc(fromName)}</span> te reconoció${_pts2 > 0 ? ` con <strong>+${_pts2} puntos</strong>` : ''} · ${esc(n.data?.program)}`;
     } else if (n.type === 'reaction') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${esc((fromName[0] || '?').toUpperCase())}</div>`;
       text = `<span class="font-semibold">${esc(fromName)}</span> reaccionó ${esc(n.data?.emoji)} a tu reconocimiento`;
@@ -5443,6 +5595,9 @@ function renderNotificationsPage() {
     } else if (n.type === 'csv_rejected') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="file-x" class="w-5 h-5 text-red-500"></i></div>`;
       text = `Tu CSV <strong>${esc(n.data?.file_name || 'archivo')}</strong> fue rechazado${n.data?.rejection_reason ? ` · <em>${esc(n.data.rejection_reason)}</em>` : ''}`;
+    } else if (n.type === 'order_status_update') {
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center shrink-0"><i data-lucide="package" class="w-5 h-5 text-violet-500"></i></div>`;
+      text = `${n.data?.status_emoji || '📦'} Tu pedido${n.data?.order_number ? ` <strong>#${n.data.order_number}</strong>` : ''} cambió a <strong>${esc(n.data?.status_label || n.data?.status || '—')}</strong>`;
     } else {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-[#3d2b56] flex items-center justify-center text-white font-bold shrink-0">${esc((fromName[0] || '?').toUpperCase())}</div>`;
       text = `<span class="font-semibold">${esc(fromName)}</span> comentó en tu reconocimiento`;
@@ -5549,6 +5704,9 @@ async function handleNotificationClick(id) {
         }
       }, 300);
     }
+  } else if (n.type === 'order_status_update') {
+    _closeAllOverlays();
+    openOrdersPage();
   }
 }
 
@@ -5576,6 +5734,587 @@ async function openStore() {
 
 function closeStore() {
   document.getElementById('store-page').classList.add('hidden');
+}
+
+// ─── CARRITO ──────────────────────────────────────────────────────────────────
+
+let _cart = [];
+
+function _cartKey() { return `allay_cart_${currentUser?.__backendId || 'guest'}`; }
+
+function _loadCart() {
+  try { _cart = JSON.parse(localStorage.getItem(_cartKey()) || '[]'); } catch { _cart = []; }
+  _updateCartBadge();
+}
+
+function _saveCart() {
+  localStorage.setItem(_cartKey(), JSON.stringify(_cart));
+  _updateCartBadge();
+}
+
+function _updateCartBadge() {
+  const total = _cart.reduce((s, i) => s + i.qty, 0);
+  ['cart-badge-store', 'cart-badge-dropdown'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = total;
+    el.classList.toggle('hidden', total === 0);
+  });
+}
+
+function addToCart(rewardId, name, cost, emoji, imageUrl, stock) {
+  const existing = _cart.find(i => i.id === rewardId);
+  if (existing) {
+    const maxQty = (stock !== null && stock !== undefined) ? stock : 99;
+    if (existing.qty >= maxQty) {
+      showErrorToast('No podés agregar más unidades de este producto');
+      return;
+    }
+    existing.qty += 1;
+  } else {
+    _cart.push({ id: rewardId, name, cost, emoji, imageUrl, qty: 1, stock });
+  }
+  _saveCart();
+  showSuccessToast(`"${name}" agregado al carrito`);
+  // Actualizar botón en la card
+  const btn = document.querySelector(`[data-cart-id="${rewardId}"]`);
+  if (btn) _styleCartBtn(btn, _cart.find(i => i.id === rewardId)?.qty || 0);
+}
+
+function _styleCartBtn(btn, qty) {
+  if (qty > 0) {
+    btn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i> En el carrito (${qty})`;
+    btn.classList.remove('bg-[#3d2b56]', 'hover:bg-[#2e1f42]');
+    btn.classList.add('bg-green-600', 'hover:bg-green-700');
+  } else {
+    btn.innerHTML = `<i data-lucide="shopping-cart" class="w-3.5 h-3.5"></i> Agregar al carrito`;
+    btn.classList.add('bg-[#3d2b56]', 'hover:bg-[#2e1f42]');
+    btn.classList.remove('bg-green-600', 'hover:bg-green-700');
+  }
+  if (window.lucide) lucide.createIcons({ nodes: [btn] });
+}
+
+function openCartPage() {
+  _loadCart();
+  const page = document.getElementById('cart-page');
+  if (!page) return;
+  page.classList.remove('hidden');
+  _positionOverlayPage('cart-page');
+  _renderCart();
+  lucide.createIcons();
+}
+
+function closeCartPage() {
+  document.getElementById('cart-page')?.classList.add('hidden');
+}
+
+function _renderCart() {
+  const container = document.getElementById('cart-items-container');
+  const footer    = document.getElementById('cart-footer');
+  const pts       = currentUser?.points_to_redeem || 0;
+  document.getElementById('cart-points-display').textContent  = `${pts} puntos`;
+  document.getElementById('cart-available-pts').textContent   = `${pts} pts`;
+
+  if (_cart.length === 0) {
+    if (footer) footer.classList.add('hidden');
+    container.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-20 text-center">
+        <div class="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+          <i data-lucide="shopping-cart" class="w-8 h-8 text-gray-300"></i>
+        </div>
+        <p class="text-gray-500 font-semibold">Tu carrito está vacío</p>
+        <p class="text-xs text-gray-400 mt-1">Explorá el Store y agregá productos</p>
+        <button onclick="closeCartPage()" class="mt-5 px-5 py-2 rounded-xl bg-[#3d2b56] text-white text-sm font-semibold hover:bg-[#2e1f42] transition">
+          Ir al Store
+        </button>
+      </div>`;
+    lucide.createIcons();
+    return;
+  }
+
+  const total = _cart.reduce((s, i) => s + i.cost * i.qty, 0);
+  const remaining = pts - total;
+  const canAfford = remaining >= 0;
+
+  if (footer) footer.classList.remove('hidden');
+  document.getElementById('cart-total-pts').textContent     = `${total} pts`;
+  document.getElementById('cart-remaining-pts').textContent = `${remaining} pts`;
+  document.getElementById('cart-remaining-pts').className   = remaining >= 0 ? 'text-green-600' : 'text-red-500';
+
+  const checkoutBtn = document.getElementById('cart-checkout-btn');
+  if (checkoutBtn) {
+    checkoutBtn.disabled = !canAfford;
+    checkoutBtn.classList.toggle('opacity-50', !canAfford);
+    checkoutBtn.classList.toggle('cursor-not-allowed', !canAfford);
+  }
+
+  container.innerHTML = _cart.map(item => `
+    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center gap-4">
+      <div class="w-14 h-14 rounded-xl bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
+        ${item.imageUrl
+          ? `<img src="${esc(item.imageUrl)}" class="w-full h-full object-cover">`
+          : `<span class="text-2xl">${esc(item.emoji || '🎁')}</span>`}
+      </div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-bold text-gray-800 truncate">${esc(item.name)}</p>
+        <p class="text-xs text-[#3d2b56] font-semibold mt-0.5">${item.cost} pts c/u</p>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button onclick="updateCartQty('${item.id}', -1)"
+          class="w-7 h-7 rounded-lg border border-gray-200 flex items-center justify-center hover:bg-gray-100 transition text-gray-600 font-bold text-lg leading-none">−</button>
+        <span class="text-sm font-bold text-gray-800 w-5 text-center">${item.qty}</span>
+        <button onclick="updateCartQty('${item.id}', 1)"
+          class="w-7 h-7 rounded-lg border border-gray-200 flex items-center justify-center hover:bg-gray-100 transition text-gray-600 font-bold text-lg leading-none">+</button>
+        <button onclick="removeFromCart('${item.id}')" class="ml-1 p-1.5 rounded-lg hover:bg-red-50 transition text-gray-300 hover:text-red-400">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>`).join('');
+  lucide.createIcons();
+}
+
+function removeFromCart(rewardId) {
+  _cart = _cart.filter(i => i.id !== rewardId);
+  _saveCart();
+  _renderCart();
+  // Resetear botón en el store
+  const btn = document.querySelector(`[data-cart-id="${rewardId}"]`);
+  if (btn) _styleCartBtn(btn, 0);
+}
+
+function updateCartQty(rewardId, delta) {
+  const item = _cart.find(i => i.id === rewardId);
+  if (!item) return;
+  const maxQty = (item.stock !== null && item.stock !== undefined) ? item.stock : 99;
+  item.qty = Math.max(1, Math.min(item.qty + delta, maxQty));
+  _saveCart();
+  _renderCart();
+}
+
+// ── Checkout flow (3 steps) ──────────────────────────────────────────────────
+let _checkoutStep = 1;
+let _checkoutAddr = {};
+
+function openCheckout() {
+  if (_cart.length === 0) return;
+  const total = _cart.reduce((s, i) => s + i.cost * i.qty, 0);
+  if ((currentUser?.points_to_redeem || 0) < total) {
+    showErrorToast('No tenés suficientes puntos para este carrito');
+    return;
+  }
+  _checkoutStep = 1;
+  document.getElementById('checkout-overlay').classList.remove('hidden');
+  _renderCheckoutStep();
+}
+
+function closeCheckout() {
+  document.getElementById('checkout-overlay').classList.add('hidden');
+}
+
+function _renderCheckoutStep() {
+  const titles  = ['Datos de envío', 'Términos y condiciones', 'Confirmá tu pedido'];
+  const labels  = ['Continuar', 'Aceptar y continuar', 'Confirmar pedido'];
+  const stepLbl = ['Paso 1 de 3', 'Paso 2 de 3', 'Paso 3 de 3'];
+
+  document.getElementById('checkout-title').textContent      = titles[_checkoutStep - 1];
+  document.getElementById('checkout-next-label').textContent = labels[_checkoutStep - 1];
+  document.getElementById('checkout-step-label').textContent = stepLbl[_checkoutStep - 1];
+
+  for (let i = 1; i <= 3; i++) {
+    document.getElementById(`step-bar-${i}`).className =
+      `flex-1 h-1 rounded-full transition-all ${i <= _checkoutStep ? 'bg-[#3d2b56]' : 'bg-gray-200'}`;
+  }
+
+  const backBtn = document.getElementById('checkout-back-btn');
+  backBtn.classList.toggle('invisible', _checkoutStep === 1);
+
+  const nextBtn = document.getElementById('checkout-next-btn');
+  nextBtn.disabled = false;
+  nextBtn.innerHTML = `<span id="checkout-next-label">${labels[_checkoutStep - 1]}</span><i data-lucide="arrow-right" class="w-4 h-4"></i>`;
+
+  const content = document.getElementById('checkout-content');
+  content.innerHTML = [_coStep1HTML, _coStep2HTML, _coStep3HTML][_checkoutStep - 1]();
+  lucide.createIcons();
+}
+
+function _coStep1HTML() {
+  const name = currentUser?.name || '';
+  const v = f => esc(_checkoutAddr[f] || '');
+  return `
+    <p class="text-sm text-gray-500 mb-5">Ingresá la dirección donde querés recibir tu pedido.</p>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1.5">Nombre completo *</label>
+        <input id="co-name" type="text" value="${_checkoutAddr.name !== undefined ? v('name') : esc(name)}"
+          placeholder="Tu nombre completo"
+          class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1.5">Calle y número *</label>
+        <input id="co-address" type="text" value="${v('address')}" placeholder="Ej: Av. Corrientes 1234"
+          class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1.5">Piso / Depto <span class="font-normal text-gray-400">(opcional)</span></label>
+        <input id="co-apt" type="text" value="${v('apt')}" placeholder="Ej: 3° B"
+          class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1.5">Ciudad *</label>
+          <input id="co-city" type="text" value="${v('city')}" placeholder="Ej: Buenos Aires"
+            class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1.5">Provincia *</label>
+          <input id="co-province" type="text" value="${v('province')}" placeholder="Ej: CABA"
+            class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1.5">Código postal *</label>
+          <input id="co-zip" type="text" value="${v('zip')}" placeholder="Ej: 1043"
+            class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1.5">Teléfono *</label>
+          <input id="co-phone" type="tel" value="${v('phone')}" placeholder="Ej: +54 11 1234-5678"
+            class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300">
+        </div>
+      </div>
+    </div>`;
+}
+
+function _coStep2HTML() {
+  return `
+    <div class="space-y-5">
+      <div class="bg-gray-50 rounded-xl p-5 text-sm text-gray-600 leading-relaxed max-h-60 overflow-y-auto border border-gray-200">
+        <p class="font-bold text-gray-800 mb-3">Términos y condiciones del Store</p>
+        <ul class="list-disc list-inside space-y-2.5">
+          <li>Los puntos serán descontados de tu cuenta al momento de confirmar el canje.</li>
+          <li>Allay se comunicará con vos al email registrado para coordinar la entrega del pedido.</li>
+          <li>Los tiempos de entrega pueden variar según el producto y la ubicación.</li>
+          <li>Una vez confirmado, el canje no puede ser cancelado.</li>
+          <li>En caso de productos sin stock al momento del procesamiento, Allay te notificará y buscará una alternativa.</li>
+          <li>La información de envío proporcionada debe ser correcta. Allay no se responsabiliza por envíos a direcciones incorrectas.</li>
+        </ul>
+      </div>
+      <label class="flex items-start gap-3 cursor-pointer select-none">
+        <input id="co-terms" type="checkbox" class="mt-0.5 w-4 h-4 rounded accent-[#3d2b56] shrink-0">
+        <span class="text-sm text-gray-700">Leí y acepto los términos y condiciones del canje.</span>
+      </label>
+    </div>`;
+}
+
+function _coStep3HTML() {
+  const pts     = currentUser?.points_to_redeem || 0;
+  const total   = _cart.reduce((s, i) => s + i.cost * i.qty, 0);
+  const remaining = pts - total;
+  const addr    = _checkoutAddr;
+  const aptLine = addr.apt ? `, ${addr.apt}` : '';
+
+  const itemsHTML = _cart.map(i => `
+    <div class="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
+      <div class="flex items-center gap-2.5">
+        <span class="text-xl leading-none">${i.emoji || '🎁'}</span>
+        <div>
+          <p class="text-sm font-semibold text-gray-800 leading-snug">${esc(i.name)}</p>
+          <p class="text-xs text-gray-400">x${i.qty} · ${i.cost} pts c/u</p>
+        </div>
+      </div>
+      <span class="text-sm font-bold text-[#3d2b56]">${i.cost * i.qty} pts</span>
+    </div>`).join('');
+
+  return `
+    <div class="space-y-5">
+      <div>
+        <p class="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-2">Tu pedido</p>
+        <div class="bg-white border border-gray-100 rounded-xl px-4">${itemsHTML}</div>
+      </div>
+      <div class="bg-[#3d2b56]/5 rounded-xl p-4 space-y-2">
+        <div class="flex justify-between text-sm text-gray-600">
+          <span>Puntos disponibles</span>
+          <span class="font-semibold text-violet-700">${pts} pts</span>
+        </div>
+        <div class="flex justify-between text-sm text-gray-600">
+          <span>Total del pedido</span>
+          <span class="font-semibold text-gray-800">−${total} pts</span>
+        </div>
+        <div class="flex justify-between font-bold text-sm pt-2 border-t border-[#3d2b56]/10">
+          <span>Puntos restantes</span>
+          <span class="${remaining < 0 ? 'text-red-600' : 'text-[#3d2b56]'}">${remaining} pts</span>
+        </div>
+      </div>
+      <div>
+        <p class="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-2">Dirección de envío</p>
+        <div class="bg-white border border-gray-100 rounded-xl p-4 text-sm text-gray-700 space-y-0.5">
+          <p class="font-semibold text-gray-800">${esc(addr.name)}</p>
+          <p>${esc(addr.address)}${esc(aptLine)}</p>
+          <p>${esc(addr.city)}, ${esc(addr.province)} (CP ${esc(addr.zip)})</p>
+          <p class="text-gray-500">Tel: ${esc(addr.phone)}</p>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function checkoutNext() {
+  if (_checkoutStep === 1) {
+    const g = id => document.getElementById(id)?.value.trim() || '';
+    const name     = g('co-name');
+    const address  = g('co-address');
+    const city     = g('co-city');
+    const province = g('co-province');
+    const zip      = g('co-zip');
+    const phone    = g('co-phone');
+    const apt      = g('co-apt');
+    if (!name || !address || !city || !province || !zip || !phone) {
+      showErrorToast('Completá todos los campos obligatorios (*)');
+      return;
+    }
+    _checkoutAddr = { name, address, apt, city, province, zip, phone };
+    _checkoutStep = 2;
+    _renderCheckoutStep();
+
+  } else if (_checkoutStep === 2) {
+    if (!document.getElementById('co-terms')?.checked) {
+      showErrorToast('Tenés que aceptar los términos y condiciones para continuar');
+      return;
+    }
+    _checkoutStep = 3;
+    _renderCheckoutStep();
+
+  } else {
+    await _processCartCheckout();
+  }
+}
+
+function checkoutBack() {
+  if (_checkoutStep > 1) { _checkoutStep--; _renderCheckoutStep(); }
+}
+
+async function _processCartCheckout() {
+  if (_cart.length === 0) return;
+  const total = _cart.reduce((s, i) => s + i.cost * i.qty, 0);
+
+  const btn = document.getElementById('checkout-next-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin inline-block mr-2"></i>Procesando...'; lucide.createIcons(); }
+
+  // 1. Guardar el pedido en la DB antes de descontar puntos
+  const orderItems = _cart.map(i => ({ id: i.id, name: i.name, emoji: i.emoji || '🎁', qty: i.qty, cost: i.cost }));
+  const { order_number: newOrderNumber } = await window.ordersSdk.create({
+    user_id:      currentUser.__backendId,
+    company_id:   currentUser.company_id,
+    address:      _checkoutAddr,
+    items:        orderItems,
+    total_points: total,
+  });
+
+  // 2. Descontar puntos por cada ítem
+  const errors = [];
+  for (const item of _cart) {
+    for (let q = 0; q < item.qty; q++) {
+      const { isOk, error } = await window.rewardSdk.redeem(item.id);
+      if (!isOk) {
+        errors.push(error?.message === 'out_of_stock' ? `"${item.name}" sin stock` : `Error canjeando "${item.name}"`);
+        break;
+      }
+      currentUser.points_to_redeem -= item.cost;
+    }
+  }
+
+  // redeem_reward RPC uses auth.uid() internally; during impersonation that's the superadmin,
+  // not the employee. Explicitly write the deducted balance to the employee's profile so the
+  // DB is always correct regardless of whether the RPC deducted the right row.
+  await window.dataSdk.update(currentUser);
+
+  // 3. Enviar mail a Allay con los detalles
+  if (errors.length === 0) {
+    const addr      = _checkoutAddr;
+    const aptLine   = addr.apt ? `\nPiso/Depto: ${addr.apt}` : '';
+    const itemsText = orderItems.map(i => `  • ${i.emoji} ${i.name} x${i.qty} = ${i.cost * i.qty} pts`).join('\n');
+    const orderTag = newOrderNumber ? ` · Pedido #${newOrderNumber}` : '';
+    const msg = `NUEVO PEDIDO DE STORE${orderTag}\n${'═'.repeat(40)}\n\nNÚMERO DE PEDIDO: #${newOrderNumber || '—'}\n\nPRODUCTOS:\n${itemsText}\n\nTotal descontado: ${total} pts\n\nDIRECCIÓN DE ENVÍO:\n  Nombre: ${addr.name}\n  Dirección: ${addr.address}${aptLine}\n  Ciudad: ${addr.city}\n  Provincia: ${addr.province}\n  Código postal: ${addr.zip}\n  Teléfono: ${addr.phone}\n\n─ El usuario aceptó los términos y condiciones del canje.`;
+    await window.supportSdk.submit({
+      subject:   '🛍️ Nuevo pedido de Store',
+      message:   msg,
+      fromName:  currentUser.name,
+      fromEmail: currentUser.email,
+    });
+  }
+
+  await window.dataSdk.refresh();
+  updateAllPointsDisplays();
+  _updateStoreHeaderPoints();
+
+  _cart = [];
+  _saveCart();
+  closeCheckout();
+  closeCartPage();
+
+  if (errors.length > 0) {
+    showErrorToast(errors[0]);
+  } else {
+    showSuccessToast('¡Pedido confirmado! Te contactaremos para coordinar la entrega.');
+  }
+
+  await renderStore();
+}
+
+// ── Mis pedidos ───────────────────────────────────────────────────────────────
+const _ORDER_STATUS = {
+  pendiente:  { label: 'Pendiente',      cls: 'bg-gray-100 text-gray-600' },
+  procesando: { label: 'En preparación', cls: 'bg-amber-50 text-amber-700' },
+  enviado:    { label: 'Enviado',        cls: 'bg-blue-50 text-blue-700' },
+  entregado:  { label: 'Entregado',      cls: 'bg-green-50 text-green-700' },
+};
+
+let _ordersIsAdminView = false;
+let _ordersCache = [];
+
+async function openOrdersPage() {
+  const page = document.getElementById('orders-page');
+  if (!page) return;
+  page.classList.remove('hidden');
+  _positionOverlayPage('orders-page');
+
+  _ordersIsAdminView = currentUser?.role === 'superadmin' && !isImpersonating;
+  document.getElementById('orders-page-title').textContent =
+    _ordersIsAdminView ? 'Pedidos del Store' : 'Mis pedidos';
+
+  document.getElementById('orders-list-container').innerHTML =
+    `<div class="flex justify-center py-10"><i data-lucide="loader" class="w-6 h-6 text-gray-300 animate-spin"></i></div>`;
+  lucide.createIcons();
+
+  await _loadAndRenderOrders();
+}
+
+async function _loadAndRenderOrders() {
+  let data;
+  if (_ordersIsAdminView) {
+    ({ data } = await window.ordersSdk.listForCompany(null));
+  } else {
+    ({ data } = await window.ordersSdk.listMine(currentUser?.__backendId));
+  }
+  _ordersCache = data || [];
+  _renderOrdersList(_ordersCache);
+  lucide.createIcons();
+}
+
+function closeOrdersPage() {
+  document.getElementById('orders-page')?.classList.add('hidden');
+}
+
+async function updateOrderStatus(orderId, status, userId) {
+  const { isOk } = await window.ordersSdk.updateStatus(orderId, status);
+  if (!isOk) { showErrorToast('Error al actualizar el estado'); return; }
+
+  // Notificar al empleado (respetando sus preferencias)
+  if (userId) {
+    const recipient = allUsers.find(u => u.__backendId === userId);
+    const recipientPrefs = { ..._NOTIF_DEFAULTS['canjes'], ...(recipient?.notif_prefs?.canjes || {}) };
+    if (recipientPrefs.platform) {
+      const st = _ORDER_STATUS[status] || { label: status };
+      const statusEmoji = { pendiente: '📋', procesando: '📦', enviado: '🚀', entregado: '✅' }[status] || '📦';
+      const orderNum = _ordersCache.find(o => o.id === orderId)?.order_number;
+      await window.notificationSdk.send([{
+        user_id: userId,
+        type: 'order_status_update',
+        data: { order_id: orderId, order_number: orderNum, status, status_label: st.label, status_emoji: statusEmoji },
+      }]);
+    }
+  }
+
+  showSuccessToast('Estado actualizado');
+  await _loadAndRenderOrders();
+  if (isImpersonating) await loadNotifications();
+}
+
+function _renderOrdersList(orders) {
+  const container = document.getElementById('orders-list-container');
+  if (!orders || orders.length === 0) {
+    const emptyMsg = _ordersIsAdminView ? 'No hay pedidos todavía' : 'Todavía no tenés pedidos';
+    const emptyDesc = _ordersIsAdminView ? 'Los pedidos de los empleados aparecerán acá' : 'Explorá el Store y usá tus puntos';
+    container.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-20 text-center">
+        <div class="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+          <i data-lucide="package" class="w-8 h-8 text-gray-300"></i>
+        </div>
+        <p class="font-bold text-gray-700 mb-1">${emptyMsg}</p>
+        <p class="text-sm text-gray-400 mb-6">${emptyDesc}</p>
+        ${!_ordersIsAdminView ? `<button onclick="closeOrdersPage()"
+          class="px-5 py-2 rounded-full bg-[#3d2b56] text-white text-sm font-bold hover:bg-[#2e1f42] transition">
+          Ir al Store
+        </button>` : ''}
+      </div>`;
+    return;
+  }
+
+  const steps      = ['pendiente','procesando','enviado','entregado'];
+  const stepLabels = ['Pedido recibido','En preparación','Enviado','Entregado'];
+
+  container.innerHTML = orders.map(order => {
+    const st      = _ORDER_STATUS[order.status] || _ORDER_STATUS.pendiente;
+    const date    = new Date(order.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' });
+    const addr    = order.address || {};
+    const aptLine = addr.apt ? `, ${addr.apt}` : '';
+
+    // Employee name (for admin view)
+    const emp     = _ordersIsAdminView ? (allUsers.find(u => u.__backendId === order.user_id) || null) : null;
+    const empName = emp?.name || addr.name || '—';
+
+    const items = (order.items || []).map(i =>
+      `<div class="flex items-center justify-between text-sm py-1.5 border-b border-gray-50 last:border-0">
+         <span class="flex items-center gap-2 text-gray-700">
+           <span class="text-base leading-none">${i.emoji || '🎁'}</span>
+           <span>${esc(i.name)}</span>
+           <span class="text-gray-400 text-xs">x${i.qty}</span>
+         </span>
+         <span class="text-[#3d2b56] font-semibold shrink-0">${i.cost * i.qty} pts</span>
+       </div>`
+    ).join('');
+
+    const stepIdx = steps.indexOf(order.status);
+    const tracker = steps.map((s, i) => {
+      const done    = i <= stepIdx;
+      const current = i === stepIdx;
+      return `<div class="flex flex-col items-center flex-1">
+        <div class="w-6 h-6 rounded-full flex items-center justify-center mb-1 ${done ? 'bg-[#3d2b56]' : 'bg-gray-200'}">
+          ${done ? '<i data-lucide="check" class="w-3 h-3 text-white"></i>' : ''}
+        </div>
+        <span class="text-[10px] text-center leading-tight ${current ? 'text-[#3d2b56] font-bold' : 'text-gray-400'}">${stepLabels[i]}</span>
+      </div>
+      ${i < steps.length - 1 ? `<div class="flex-1 h-px mt-3 ${i < stepIdx ? 'bg-[#3d2b56]' : 'bg-gray-200'} self-start"></div>` : ''}`;
+    }).join('');
+
+    const statusSelect = _ordersIsAdminView ? `
+      <div class="px-5 py-3 border-t border-gray-50 flex items-center justify-between gap-3">
+        <span class="text-xs text-gray-500 shrink-0">Cambiar estado</span>
+        <select onchange="updateOrderStatus('${order.id}', this.value, '${order.user_id || ''}')"
+          class="text-xs border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 cursor-pointer">
+          ${steps.map(s => `<option value="${s}" ${order.status === s ? 'selected' : ''}>${_ORDER_STATUS[s].label}</option>`).join('')}
+        </select>
+      </div>` : '';
+
+    return `
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-gray-50">
+          <div>
+            ${_ordersIsAdminView ? `<p class="text-sm font-bold text-gray-800">${esc(empName)}</p>` : ''}
+            <p class="text-xs font-semibold text-[#3d2b56] ${_ordersIsAdminView ? 'mt-0.5' : ''}">Pedido #${order.order_number || '—'}</p>
+            <p class="text-xs text-gray-400 mt-0.5">${date} · ${order.total_points} pts</p>
+          </div>
+          <span class="text-xs font-bold px-3 py-1 rounded-full ${st.cls} shrink-0">${st.label}</span>
+        </div>
+        <div class="flex items-start px-5 py-4 border-b border-gray-50">${tracker}</div>
+        <div class="px-5 py-3 border-b border-gray-50">${items}</div>
+        <div class="px-5 py-3 flex items-start gap-2 text-xs text-gray-500">
+          <i data-lucide="map-pin" class="w-3.5 h-3.5 text-gray-400 mt-0.5 shrink-0"></i>
+          <span>${esc(addr.name)} · ${esc(addr.address)}${esc(aptLine)}, ${esc(addr.city)}, ${esc(addr.province)}</span>
+        </div>
+        ${statusSelect}
+      </div>`;
+  }).join('');
 }
 
 function _updateStoreHeaderPoints() {
@@ -5744,6 +6483,19 @@ function buildStoreRewardCard(r, userPts, isPlaceholder, cat) {
     </div>`;
   }
 
+  const inCart    = _cart.find(i => i.id === id);
+  const cartQty   = inCart?.qty || 0;
+  const canAddCart = !isPlaceholder && !outOfStock;
+  const cartBtnLabel = isPlaceholder ? 'Próximamente'
+    : outOfStock ? 'Sin stock'
+    : cartQty > 0 ? `<i data-lucide="check" class="w-3.5 h-3.5 inline-block mr-1"></i>En el carrito (${cartQty})`
+    : `<i data-lucide="shopping-cart" class="w-3.5 h-3.5 inline-block mr-1"></i>Agregar al carrito`;
+  const cartBtnClass = isPlaceholder || outOfStock
+    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+    : cartQty > 0
+      ? 'bg-green-600 text-white hover:bg-green-700'
+      : 'bg-[#3d2b56] text-white hover:bg-[#2e1f42]';
+
   return `<div class="bg-white rounded-xl border border-gray-100 p-5 flex flex-col gap-3 hover:shadow-md transition relative">
     ${badge ? `<span class="absolute top-4 right-4 text-[10px] font-bold bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full z-10">${badge}</span>` : ''}
     <img src="${imgSrc}" alt="${name}" class="w-full h-28 object-cover rounded-lg bg-gray-50">
@@ -5758,12 +6510,13 @@ function buildStoreRewardCard(r, userPts, isPlaceholder, cat) {
           <span class="text-xs text-gray-400">puntos</span>
         </div>
         ${!isPlaceholder && outOfStock ? `<p class="text-[10px] text-pink-500 font-medium mt-0.5">Sin stock</p>` : ''}
-        ${!isPlaceholder && !outOfStock && !canAfford  ? `<p class="text-[10px] text-pink-500 font-medium mt-0.5">Te faltan ${missing} puntos</p>` : ''}
-        ${!isPlaceholder && !outOfStock &&  canAfford  ? `<p class="text-[10px] text-emerald-500 font-medium mt-0.5">Podés canjear esto ✓</p>` : ''}
+        ${!isPlaceholder && !outOfStock && !canAfford ? `<p class="text-[10px] text-pink-500 font-medium mt-0.5">Te faltan ${missing} puntos</p>` : ''}
+        ${!isPlaceholder && !outOfStock &&  canAfford ? `<p class="text-[10px] text-emerald-500 font-medium mt-0.5">Podés canjear ✓</p>` : ''}
       </div>
-      <button ${canRedeem ? `onclick="redeemReward('${id}', '${name}', ${cost})"` : 'disabled'}
-        class="px-4 py-1.5 rounded-full text-xs font-bold transition ${canRedeem ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}">
-        ${isPlaceholder ? 'Próximamente' : outOfStock ? 'Sin stock' : canAfford ? 'Canjear' : 'Sin puntos'}
+      <button data-cart-id="${id}"
+        ${canAddCart ? `onclick="addToCart('${id}','${r.name || ''}',${cost},'${esc(r.emoji||cat?.emoji||'🎁')}','${esc(r.image_url||'')}',${r.stock ?? 'null'})"` : 'disabled'}
+        class="px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1 shadow-sm ${cartBtnClass}">
+        ${cartBtnLabel}
       </button>
     </div>
   </div>`;
@@ -5883,6 +6636,7 @@ async function redeemReward(rewardId, name, cost) {
   }
 
   currentUser.points_to_redeem -= cost;
+  await window.dataSdk.update(currentUser);
   await window.dataSdk.refresh();
   updateAllPointsDisplays();
   _updateStoreHeaderPoints();
@@ -6686,7 +7440,7 @@ function _renderSuperadminProgramsPage(grid) {
   }).join('');
 
   const globalsHtml = globals.length
-    ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">${globals.map(p => _buildActiveProgramCard(p)).join('')}</div>`
+    ? `<div class="grid grid-cols-2 gap-3">${globals.map(p => _buildActiveProgramCard(p)).join('')}</div>`
     : '<p class="text-sm text-gray-400 py-4">Sin programas globales.</p>';
 
   const customsHtml = Object.keys(byCompany).length
@@ -6697,7 +7451,7 @@ function _renderSuperadminProgramsPage(grid) {
   <div class="flex flex-col lg:flex-row gap-6 items-start">
 
     <!-- Columna izquierda: Globales -->
-    <div class="w-full lg:w-80 shrink-0">
+    <div class="w-full lg:w-[480px] shrink-0">
       <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-50 bg-violet-50">
           <h3 class="font-bold text-violet-800 text-sm">Programas globales</h3>
@@ -7859,15 +8613,20 @@ function _deductProgramBudget(id, points) {
 //    Support Widget                                                             
 const _FAQ = [
   { q: '¿Cómo enviar un reconocimiento?',
-    a: 'Hacé clic en algún botón de "Reconocer" o buscá a un compañero en el box de búsqueda del inicio. Elegí la persona y seguí los pasos para enviar un mensaje significativo a tu compañero.' },
+    a: 'Hacé clic en algún botón de "Reconocer" o buscá a un compañero en el box de búsqueda del inicio. Elegí la persona y seguí los pasos para enviar un mensaje significativo a tu compañero.',
+    actionLabel: 'Reconocer ahora', actionFn: 'openModal()' },
   { q: '¿Cómo crear un programa personalizado?',
-    a: 'En el panel lateral, hace click en "Programas". Hacé clic en el botón "+ Nuevo programa" del lado derecho y seguí los pasos para crear un programa, acordáte de leer los consejos y condiciones.' },
+    a: 'En el panel lateral, hace click en "Programas". Hacé clic en el botón "+ Nuevo programa" del lado derecho y seguí los pasos para crear un programa, acordáte de leer los consejos y condiciones.',
+    actionLabel: 'Ir a Programas', actionFn: 'openProgramsPage()' },
   { q: '¿Cómo canjear puntos?',
-    a: 'Si tenés puntos para canjear podés hacer clic en tu saldo en la pantalla de inicio o en el botón de "Store" en el panel lateral para navegar por la tienda y ver todos los canjes posibles. Seleccioná el artículo que quieras y seguí los pasos para completar tu pedido.' },
+    a: 'Si tenés puntos para canjear podés hacer clic en tu saldo en la pantalla de inicio o en el botón de "Store" en el panel lateral para navegar por la tienda y ver todos los canjes posibles. Seleccioná el artículo que quieras y seguí los pasos para completar tu pedido.',
+    actionLabel: 'Ir al Store', actionFn: 'openStore()' },
   { q: '¿Qué es un reconocimiento privado?',
-    a: 'Solo lo ven vos, el destinatario y los administradores de la plataforma. No aparece en el feed público. Activálo con el toggle en el paso 3 del modal.' },
+    a: 'Solo lo ven vos, el destinatario y los administradores de la plataforma. No aparece en el feed público. Activálo con el toggle en el paso 3 del modal de reconocimiento.',
+    actionLabel: 'Enviar uno privado', actionFn: 'openModal()' },
   { q: '¿Cómo cambiar mi contraseña?',
-    a: 'Hacé clic en tu avatar en la barra lateral. Desde Configuración de perfil encontrás la opción para actualizar la contraseña.' },
+    a: 'Hacé clic en tu avatar en la barra lateral. Desde Configuración de perfil encontrás la opción para actualizar la contraseña.',
+    actionLabel: 'Ir a mi perfil', actionFn: 'openProfilePage()' },
 ];
 
 let _supportOpen = false;
@@ -7904,22 +8663,35 @@ function setSupportTab(tab) {
   const tcon    = document.getElementById('support-tab-contact');
   if (tfaq) tfaq.className = isFaq ? activeC : idleC;
   if (tcon) tcon.className = isFaq ? idleC   : activeC;
+  if (!isFaq) {
+    const subject = document.getElementById('support-subject')?.value || 'Problema técnico';
+    _renderContactForm(subject);
+  }
 }
 
 function _renderFaqItems() {
   const container = document.getElementById('support-faq');
   if (!container) return;
-  container.innerHTML = _FAQ.map((item, i) => `
-    <div class="rounded-xl border border-gray-100 overflow-hidden">
+  container.innerHTML = _FAQ.map((item, i) => {
+    const isOpen = _faqOpen === i;
+    const actionBtn = isOpen && item.actionLabel
+      ? `<button onclick="toggleSupport();${item.actionFn}"
+           class="mt-3 w-full py-2 rounded-lg bg-[#3d2b56] text-white text-xs font-semibold hover:bg-violet-900 transition flex items-center justify-center gap-1.5">
+           <i data-lucide="arrow-right" class="w-3 h-3"></i> ${esc(item.actionLabel)}
+         </button>`
+      : '';
+    return `<div class="rounded-xl border border-gray-100 overflow-hidden">
       <button onclick="toggleFaq(${i})"
         class="w-full flex items-center justify-between gap-2 px-3.5 py-3 text-left bg-gray-50 hover:bg-violet-50 transition">
         <span class="text-xs font-semibold text-gray-700 leading-snug">${esc(item.q)}</span>
-        <i data-lucide="${_faqOpen === i ? 'chevron-up' : 'chevron-down'}" class="w-3.5 h-3.5 text-gray-400 shrink-0"></i>
+        <i data-lucide="${isOpen ? 'chevron-up' : 'chevron-down'}" class="w-3.5 h-3.5 text-gray-400 shrink-0"></i>
       </button>
-      <div class="${_faqOpen === i ? '' : 'hidden'} px-3.5 py-3 bg-white border-t border-gray-100">
+      <div class="${isOpen ? '' : 'hidden'} px-3.5 py-3 bg-white border-t border-gray-100">
         <p class="text-xs text-gray-600 leading-relaxed">${esc(item.a)}</p>
+        ${actionBtn}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   lucide.createIcons();
 }
 
@@ -7928,29 +8700,162 @@ function toggleFaq(idx) {
   _renderFaqItems();
 }
 
+function _sfCls() {
+  return {
+    label:    'text-xs font-semibold text-gray-600 block mb-1.5',
+    textarea: 'w-full text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none placeholder:text-gray-300',
+    input:    'w-full text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300',
+    pillA:    'px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer bg-[#3d2b56] text-white border-[#3d2b56]',
+    pillI:    'px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer bg-gray-50 text-gray-500 border-gray-200 hover:border-violet-300',
+  };
+}
+
+function _sfPillGroup(id, options) {
+  const c = _sfCls();
+  return `<div class="flex flex-wrap gap-1.5" id="${id}-group">
+    ${options.map((o, i) => `<button type="button" onclick="_sfPill('${id}',this)" class="${i === 0 ? c.pillA : c.pillI}" data-val="${o}">${o}</button>`).join('')}
+  </div><input type="hidden" id="${id}" value="${options[0]}">`;
+}
+
+function _sfPill(id, btn) {
+  const c = _sfCls();
+  document.getElementById(`${id}-group`)?.querySelectorAll('button').forEach(b => b.className = c.pillI);
+  btn.className = c.pillA;
+  const inp = document.getElementById(id);
+  if (inp) inp.value = btn.dataset.val;
+}
+
+function _renderContactForm(subject) {
+  const container = document.getElementById('support-contact-fields');
+  if (!container) return;
+  const c = _sfCls();
+  const section = currentPage === 'feed' ? 'Feed' : currentPage === 'store' ? 'Store' : currentPage === 'home' ? 'Inicio' : (currentPage || 'Inicio');
+  let html = '';
+
+  if (subject === 'Problema técnico') {
+    html = `
+      <div>
+        <label class="${c.label}">¿Qué pasó exactamente? <span class="text-red-400">*</span></label>
+        <textarea id="sf-main" rows="3" placeholder="Ej: Intenté enviar un reconocimiento y la pantalla quedó en blanco..." class="${c.textarea}"></textarea>
+      </div>
+      <div>
+        <label class="${c.label}">¿Qué esperabas que pasara?</label>
+        <textarea id="sf-expected" rows="2" placeholder="Ej: El reconocimiento debería haberse enviado correctamente..." class="${c.textarea}"></textarea>
+      </div>
+      <div>
+        <label class="${c.label}">¿En qué sección ocurrió?</label>
+        <input id="sf-section" type="text" value="${section}" class="${c.input}">
+      </div>
+      <div>
+        <label class="${c.label}">Prioridad</label>
+        ${_sfPillGroup('sf-urgency', ['Normal', 'Urgente 🚨'])}
+      </div>`;
+  } else if (subject === 'Cómo usar la plataforma') {
+    html = `
+      <div>
+        <label class="${c.label}">¿Qué querés aprender a hacer? <span class="text-red-400">*</span></label>
+        <textarea id="sf-main" rows="4" placeholder="Ej: No sé cómo crear un programa con puntos, o cómo ver los reconocimientos de mi equipo..." class="${c.textarea}"></textarea>
+      </div>`;
+  } else if (subject === 'Gestión de cuenta') {
+    html = `
+      <div>
+        <label class="${c.label}">¿Sobre qué es?</label>
+        ${_sfPillGroup('sf-account-topic', ['Mi contraseña', 'Mis datos', 'Usuarios', 'Otro'])}
+      </div>
+      <div>
+        <label class="${c.label}">Describí tu consulta <span class="text-red-400">*</span></label>
+        <textarea id="sf-main" rows="3" placeholder="Contanos el detalle..." class="${c.textarea}"></textarea>
+      </div>`;
+  } else if (subject === 'Store o canjes') {
+    html = `
+      <div>
+        <label class="${c.label}">¿Sobre qué es tu consulta?</label>
+        ${_sfPillGroup('sf-store-topic', ['No puedo canjear', 'Problema con un canje ya hecho', 'No encuentro un producto', 'Puntos no se acreditaron', 'Otro'])}
+      </div>
+      <div>
+        <label class="${c.label}">Número de pedido <span class="text-gray-400 font-normal">(si aplica)</span></label>
+        <input id="sf-order-number" type="text" placeholder="Ej: 1042" class="${c.input}">
+      </div>
+      <div>
+        <label class="${c.label}">¿Qué producto o canje está involucrado? <span class="text-gray-400 font-normal">(opcional)</span></label>
+        <input id="sf-store-item" type="text" placeholder="Ej: Gift card Netflix, caja de experiencias..." class="${c.input}">
+      </div>
+      <div>
+        <label class="${c.label}">Describí el problema <span class="text-red-400">*</span></label>
+        <textarea id="sf-main" rows="3" placeholder="Ej: Intenté canjear 500 puntos por una gift card y me dice que no tengo suficientes puntos, pero mi saldo muestra 800..." class="${c.textarea}"></textarea>
+      </div>`;
+  } else if (subject === 'Sugerencia') {
+    html = `
+      <div>
+        <label class="${c.label}">¿Sobre qué parte de la plataforma?</label>
+        ${_sfPillGroup('sf-area', ['Inicio', 'Reconocimientos', 'Store', 'Programas', 'Perfil', 'Otro'])}
+      </div>
+      <div>
+        <label class="${c.label}">Describí tu idea <span class="text-red-400">*</span></label>
+        <textarea id="sf-main" rows="3" placeholder="Ej: Estaría bueno poder filtrar los reconocimientos por programa o por fecha..." class="${c.textarea}"></textarea>
+      </div>`;
+  } else {
+    html = `
+      <div>
+        <label class="${c.label}">Contanos tu consulta <span class="text-red-400">*</span></label>
+        <textarea id="sf-main" rows="4" placeholder="Describí tu consulta con el mayor detalle posible..." class="${c.textarea}"></textarea>
+      </div>`;
+  }
+
+  container.innerHTML = html;
+  lucide.createIcons();
+}
+
 async function submitSupportForm() {
-  const message = document.getElementById('support-message')?.value?.trim();
-  const subject = document.getElementById('support-subject')?.value || 'Consulta general';
-  if (!message) { showErrorToast('Escribí tu consulta antes de enviar'); return; }
+  const subject  = document.getElementById('support-subject')?.value || 'Consulta general';
+  const main     = document.getElementById('sf-main')?.value?.trim();
+  if (!main) { showErrorToast('Por favor completá el campo obligatorio antes de enviar'); return; }
+
+  const expected     = document.getElementById('sf-expected')?.value?.trim()     || '';
+  const section      = document.getElementById('sf-section')?.value?.trim()      || '';
+  const urgency      = document.getElementById('sf-urgency')?.value              || '';
+  const accountTopic = document.getElementById('sf-account-topic')?.value        || '';
+  const area         = document.getElementById('sf-area')?.value                 || '';
+  const storeTopic   = document.getElementById('sf-store-topic')?.value          || '';
+  const orderNumber  = document.getElementById('sf-order-number')?.value?.trim() || '';
+  const storeItem    = document.getElementById('sf-store-item')?.value?.trim()   || '';
+
+  // Build structured message for the email
+  const lines = [];
+  if (subject === 'Problema técnico') {
+    lines.push(`¿Qué pasó?\n${main}`);
+    if (expected)  lines.push(`¿Qué esperabas que pasara?\n${expected}`);
+    if (section)   lines.push(`Sección: ${section}`);
+    if (urgency)   lines.push(`Prioridad: ${urgency}`);
+  } else if (subject === 'Gestión de cuenta') {
+    if (accountTopic) lines.push(`Tema: ${accountTopic}`);
+    lines.push(main);
+  } else if (subject === 'Store o canjes') {
+    if (storeTopic)   lines.push(`Tipo de problema: ${storeTopic}`);
+    if (orderNumber)  lines.push(`Número de pedido: ${orderNumber}`);
+    if (storeItem)    lines.push(`Producto o canje: ${storeItem}`);
+    lines.push(`Descripción:\n${main}`);
+  } else if (subject === 'Sugerencia') {
+    if (area) lines.push(`Sección sugerida: ${area}`);
+    lines.push(`Idea:\n${main}`);
+  } else {
+    lines.push(main);
+  }
+
+  const message = lines.join('\n\n');
 
   const btn = document.querySelector('#support-contact button[onclick="submitSupportForm()"]');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Enviando...'; lucide.createIcons(); }
 
-  const result = await window.supportSdk?.submit({
-    userId:    currentUser?.__backendId || null,
-    companyId: currentUser?.company_id  || null,
-    name:      currentUser?.name  || '',
-    email:     currentUser?.email || '',
-    subject,
-    message,
-  }) || { isOk: true };
+  const result = await window.supportSdk?.submit({ subject, message }) || { isOk: true };
 
   if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="send" class="w-3.5 h-3.5"></i> Enviar consulta'; lucide.createIcons(); }
 
   if (result.isOk) {
-    document.getElementById('support-message').value = '';
+    document.getElementById('support-contact-fields').innerHTML = '';
+    document.getElementById('support-subject').value = 'Problema técnico';
     const sent = document.getElementById('support-sent-msg');
-    if (sent) { sent.classList.remove('hidden'); setTimeout(() => sent.classList.add('hidden'), 4000); }
+    if (sent) { sent.classList.remove('hidden'); setTimeout(() => { sent.classList.add('hidden'); _renderContactForm('Problema técnico'); }, 4000); }
   } else {
     showErrorToast('No se pudo enviar. Intentá de nuevo.');
   }
