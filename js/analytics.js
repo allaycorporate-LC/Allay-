@@ -2288,8 +2288,50 @@ function openPointsPage() {
 }
 
 function closePointsPage() {
-  document.getElementById('points-page')?.classList.add('hidden');
+  ['points-page', 'pts-orders-page'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.classList.add('hidden'); el.style.display = 'none'; }
+  });
   if (currentPage === 'points') currentPage = 'home';
+}
+
+async function openPtsOrdersPage() {
+  const page = document.getElementById('pts-orders-page');
+  if (!page) return;
+  page.classList.remove('hidden');
+  page.style.display = 'flex';
+  _positionOverlayPage('pts-orders-page');
+
+  const isSA = currentUser?.role === 'superadmin' && !isImpersonating;
+  const title = document.querySelector('#pts-orders-page h2');
+  if (title) title.textContent = isSA ? 'Historial de solicitudes' : 'Mis solicitudes de puntos';
+
+  // Show/hide "Nueva solicitud" button — only for admins
+  const newBtn = document.querySelector('#pts-orders-page button[onclick="openBuyPointsModal()"]');
+  if (newBtn) newBtn.classList.toggle('hidden', isSA);
+
+  lucide.createIcons();
+
+  if (!window.pointsRequestSdk) return;
+
+  if (isSA) {
+    if (!_superadminPointsCompanies) {
+      const { data } = await window.companySdk.list();
+      _superadminPointsCompanies = data || [];
+    }
+    const { data: reqs } = await window.pointsRequestSdk.getAll();
+    _renderSAPointsHistory(reqs);
+  } else {
+    const companyId = currentUser?.company_id;
+    if (!companyId) return;
+    const { data: reqs } = await window.pointsRequestSdk.getAllForCompany(companyId);
+    _renderAdminPointsRequestsList(reqs);
+  }
+}
+
+function closePtsOrdersPage() {
+  const page = document.getElementById('pts-orders-page');
+  if (page) { page.classList.add('hidden'); page.style.display = 'none'; }
 }
 
 async function renderPointsPage() {
@@ -2301,12 +2343,12 @@ async function renderPointsPage() {
     (allUsers.find(u => u.company_id === companyId)?.company_id || companyId || 'Mi empresa');
   document.getElementById('wallet-company-name').textContent = companyId || 'Mi empresa';
 
-  // Pending/processed purchase request banner (admin view)
-  if (!isSuperadmin && companyId && window.pointsRequestSdk) {
-    const { data: req } = await window.pointsRequestSdk.getLatestForCompany(companyId);
-    _renderPointsRequestBanner(req);
-  } else {
-    document.getElementById('points-request-banner')?.classList.add('hidden');
+  // "Mis solicitudes / Historial" nav button
+  const ptsOrdersBtn   = document.getElementById('pts-orders-nav-btn');
+  const ptsOrdersLabel = document.getElementById('pts-orders-nav-label');
+  if (ptsOrdersBtn) {
+    ptsOrdersBtn.classList.replace('hidden', 'flex');
+    if (ptsOrdersLabel) ptsOrdersLabel.textContent = isSuperadmin ? 'Historial' : 'Mis solicitudes';
   }
 
   // Pending requests across companies (superadmin view)
@@ -2492,6 +2534,7 @@ let _selectedPkg = 0;
 function openBuyPointsModal() {
   _selectedPkg = 0;
   document.getElementById('buy-points-input').value = '';
+  document.getElementById('buy-points-message').value = '';
   document.getElementById('buy-points-summary').classList.add('hidden');
   document.getElementById('buy-points-btn').disabled = true;
   document.querySelectorAll('.points-pkg').forEach(b => b.classList.remove('border-violet-500', 'bg-violet-50'));
@@ -2522,7 +2565,7 @@ function onBuyPointsInput() {
 }
 
 function _updateBuyPointsSummary(pts) {
-  const valid = pts >= 100;
+  const valid = pts >= 1000;
   document.getElementById('buy-points-summary').classList.toggle('hidden', !valid);
   document.getElementById('buy-pts-qty').textContent = pts.toLocaleString('es-AR') + ' puntos';
   document.getElementById('buy-points-btn').disabled = !valid;
@@ -2530,13 +2573,14 @@ function _updateBuyPointsSummary(pts) {
 
 async function submitBuyPoints() {
   const pts = _selectedPkg || (document.getElementById('buy-points-input').valueAsNumber || 0);
-  if (pts < 100) return;
+  if (pts < 1000) return;
   closeBuyPointsModal();
 
+  let ok = false;
   try {
     const { data: { session } } = await _sb.auth.getSession();
     const token = session?.access_token || SUPABASE_ANON_KEY;
-    await fetch(`${SUPABASE_URL}/functions/v1/send-points-request`, {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-points-request`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2545,63 +2589,166 @@ async function submitBuyPoints() {
       },
       body: JSON.stringify({
         points: pts,
-        // Cuando el superadmin impersona un admin, pasamos el ID real del admin
-        // para que el mail llegue con los datos correctos de la empresa
+        message: document.getElementById('buy-points-message').value.trim() || null,
         ...(isImpersonating && currentUser?.__backendId
           ? { impersonated_user_id: currentUser.__backendId }
           : {}),
       }),
     });
-  } catch (_) { /* silently ignore */ }
-
-  showSuccessToast(`Solicitud de ${pts.toLocaleString('es-AR')} puntos enviada. El equipo de Allay te contactará pronto.`);
-
-  renderPointsPage();
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Points purchase requests — banner (admin) & queue (superadmin)
-// ──────────────────────────────────────────────────────────────────────────────
-function _renderPointsRequestBanner(req) {
-  const banner = document.getElementById('points-request-banner');
-  if (!banner) return;
-
-  if (!req || req.status === 'rejected') {
-    banner.classList.add('hidden');
-    banner.innerHTML = '';
-    if (req && req.status === 'rejected') {
-      banner.classList.remove('hidden');
-      banner.innerHTML = `
-        <div class="bg-red-50 border border-red-100 rounded-2xl px-5 py-4 flex items-center gap-3">
-          <i data-lucide="x-circle" class="w-5 h-5 text-red-500 shrink-0"></i>
-          <p class="text-sm text-red-700">Tu solicitud de <strong>${req.points.toLocaleString('es-AR')} puntos</strong> fue rechazada. Contactá al equipo de Allay para más información.</p>
-        </div>`;
-      lucide.createIcons();
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      console.error('[submitBuyPoints] error:', res.status, body);
+      showErrorToast('No se pudo enviar la solicitud. Intentá de nuevo o contactá a Allay.');
+      return;
     }
+    ok = true;
+  } catch (e) {
+    console.error('[submitBuyPoints] fetch error:', e);
+    showErrorToast('Error de conexión al enviar la solicitud.');
     return;
   }
 
-  banner.classList.remove('hidden');
-  if (req.status === 'pending') {
-    banner.innerHTML = `
-      <div class="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-4 flex items-center gap-3">
-        <i data-lucide="clock" class="w-5 h-5 text-amber-500 shrink-0"></i>
-        <p class="text-sm text-amber-700">Solicitud de <strong>${req.points.toLocaleString('es-AR')} puntos</strong> en proceso. El equipo de Allay te contactará para coordinar el pago.</p>
-      </div>`;
-  } else if (req.status === 'approved') {
-    banner.innerHTML = `
-      <div class="bg-green-50 border border-green-100 rounded-2xl px-5 py-4 flex items-center gap-3">
-        <i data-lucide="check-circle" class="w-5 h-5 text-green-500 shrink-0"></i>
-        <p class="text-sm text-green-700 flex-1">Tu solicitud de <strong>${req.points.toLocaleString('es-AR')} puntos</strong> fue aprobada. Los puntos se acreditarán a la brevedad.</p>
-        <button onclick="this.closest('#points-request-banner').classList.add('hidden')" class="p-1 rounded-full hover:bg-green-100 transition shrink-0">
-          <i data-lucide="x" class="w-4 h-4 text-green-400"></i>
-        </button>
-      </div>`;
+  if (ok) {
+    showSuccessToast(`Solicitud de ${pts.toLocaleString('es-AR')} puntos enviada. El equipo de Allay te contactará pronto.`);
+    renderPointsPage();
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Points purchase requests — panel (admin) & queue (superadmin)
+// ──────────────────────────────────────────────────────────────────────────────
+const _PTS_REQ_STATUS = {
+  pending:        { label: 'Solicitado',      chipCls: 'bg-amber-100 text-amber-700',   icon: 'clock',        step: 0 },
+  en_facturacion: { label: 'En facturación',  chipCls: 'bg-blue-100 text-blue-700',     icon: 'file-text',    step: 1 },
+  facturado:      { label: 'Facturado',       chipCls: 'bg-violet-100 text-violet-700', icon: 'receipt',      step: 2 },
+  acreditado:     { label: 'Acreditado',      chipCls: 'bg-green-100 text-green-700',   icon: 'check-circle', step: 3 },
+  approved:       { label: 'Acreditado',      chipCls: 'bg-green-100 text-green-700',   icon: 'check-circle', step: 3 },
+  rechazado:      { label: 'Rechazado',       chipCls: 'bg-red-100 text-red-700',       icon: 'x-circle',     step: -1 },
+  rejected:       { label: 'Rechazado',       chipCls: 'bg-red-100 text-red-700',       icon: 'x-circle',     step: -1 },
+};
+
+const _PTS_REQ_STEPS = ['pending', 'en_facturacion', 'facturado', 'acreditado'];
+const _PTS_REQ_STEP_LABELS = ['Solicitado', 'En facturación', 'Facturado', 'Acreditado'];
+
+function _renderAdminPointsRequestsList(requests) {
+  const list  = document.getElementById('pts-orders-list');
+  const empty = document.getElementById('pts-orders-empty');
+  if (!list) return;
+
+  if (!requests || requests.length === 0) {
+    list.innerHTML = '';
+    empty?.classList.remove('hidden');
+    lucide.createIcons();
+    return;
+  }
+  empty?.classList.add('hidden');
+
+  list.innerHTML = requests.map(req => {
+    const st = _PTS_REQ_STATUS[req.status] || _PTS_REQ_STATUS.pending;
+    const date = new Date(req.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' });
+    const isRejected = st.step === -1;
+
+    let tracker = '';
+    if (!isRejected) {
+      const stepIdx = st.step;
+      const nodes = _PTS_REQ_STEPS.map((_, i) => {
+        const done    = i < stepIdx;
+        const current = i === stepIdx;
+        const nodeC   = done || current ? 'bg-violet-500 border-violet-500' : 'bg-white border-gray-300';
+        const textC   = done || current ? 'text-violet-600 font-semibold' : 'text-gray-400';
+        const inner   = done    ? '<i data-lucide="check" class="w-2.5 h-2.5 text-white"></i>'
+                      : current ? '<div class="w-1.5 h-1.5 bg-white rounded-full"></div>'
+                      : '';
+        const line    = i < _PTS_REQ_STEPS.length - 1
+          ? `<div class="flex-1 h-0.5 mb-3.5 ${i < stepIdx ? 'bg-violet-400' : 'bg-gray-200'}"></div>`
+          : '';
+        return `
+          <div class="flex flex-col items-center">
+            <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center ${nodeC}">${inner}</div>
+            <span class="text-[9px] mt-1 text-center leading-tight ${textC} w-14">${_PTS_REQ_STEP_LABELS[i]}</span>
+          </div>${line}`;
+      }).join('');
+      tracker = `<div class="flex items-center mt-3 px-1">${nodes}</div>`;
+    }
+
+    const rejectionBadge = isRejected && req.rejection_reason
+      ? `<div class="mt-3 flex gap-2 items-start bg-red-50 rounded-xl px-3 py-2">
+           <i data-lucide="message-circle-x" class="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5"></i>
+           <p class="text-xs text-red-600 leading-relaxed">${esc(req.rejection_reason)}</p>
+         </div>`
+      : '';
+
+    return `
+    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm px-5 py-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-base font-bold text-gray-800">${req.points.toLocaleString('es-AR')} puntos</p>
+          <p class="text-xs text-gray-400 mt-0.5">${date}</p>
+        </div>
+        <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${st.chipCls}">${st.label}</span>
+      </div>
+      ${tracker}
+      ${rejectionBadge}
+    </div>`;
+  }).join('');
+
+  lucide.createIcons();
+}
+
+function _renderSAPointsHistory(requests) {
+  const list  = document.getElementById('pts-orders-list');
+  const empty = document.getElementById('pts-orders-empty');
+  if (!list) return;
+
+  if (!requests || requests.length === 0) {
+    list.innerHTML = '';
+    empty?.classList.remove('hidden');
+    lucide.createIcons();
+    return;
+  }
+  empty?.classList.add('hidden');
+
+  list.innerHTML = requests.map(req => {
+    const st      = _PTS_REQ_STATUS[req.status] || _PTS_REQ_STATUS.pending;
+    const company = (_superadminPointsCompanies || []).find(c => c.id === req.company_id);
+    const user    = allUsers.find(u => u.__backendId === req.requested_by);
+    const date    = new Date(req.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' });
+    const procDate = req.processed_at
+      ? new Date(req.processed_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })
+      : null;
+
+    const saRejection = (req.status === 'rechazado' || req.status === 'rejected') && req.rejection_reason
+      ? `<div class="mt-2 flex gap-2 items-start bg-red-50 rounded-xl px-3 py-2">
+           <i data-lucide="message-circle-x" class="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5"></i>
+           <p class="text-xs text-red-600 leading-relaxed">${esc(req.rejection_reason)}</p>
+         </div>`
+      : '';
+
+    return `
+    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm px-5 py-4">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <p class="text-base font-bold text-gray-800">${req.points.toLocaleString('es-AR')} puntos</p>
+          <p class="text-sm font-medium text-gray-600 truncate mt-0.5">${esc(company?.name || req.company_id)}</p>
+          <p class="text-xs text-gray-400 mt-0.5">${esc(user?.name || 'Admin')} · ${date}${procDate ? ` · procesado ${procDate}` : ''}</p>
+        </div>
+        <span class="px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ${st.chipCls}">${st.label}</span>
+      </div>
+      ${saRejection}
+    </div>`;
+  }).join('');
+
   lucide.createIcons();
 }
 
 let _superadminPointsCompanies = null;
+
+const _PTS_REQ_SA_OPTIONS = [
+  { value: 'en_facturacion', label: 'En facturación' },
+  { value: 'facturado',      label: 'Facturado' },
+  { value: 'acreditado',     label: 'Acreditado' },
+  { value: 'rechazado',      label: 'Rechazado' },
+];
 
 async function _renderSuperadminPointsRequests(pending) {
   const wrap = document.getElementById('points-superadmin-requests');
@@ -2620,11 +2767,18 @@ async function _renderSuperadminPointsRequests(pending) {
     _superadminPointsCompanies = data || [];
   }
 
+  _log('[pts-requests] first row sample:', JSON.stringify(pending[0]));
+
   list.innerHTML = pending.map(req => {
-    const company = _superadminPointsCompanies.find(c => c.id === req.company_id);
+    const company   = _superadminPointsCompanies.find(c => c.id === req.company_id);
     const requester = allUsers.find(u => u.__backendId === req.requested_by);
+    const st        = _PTS_REQ_STATUS[req.status] || _PTS_REQ_STATUS.pending;
+    const opts      = _PTS_REQ_SA_OPTIONS
+      .filter(o => o.value !== req.status)
+      .map(o => `<option value="${o.value}">${o.label}</option>`)
+      .join('');
     return `
-    <div class="flex items-center gap-4 px-5 py-3">
+    <div class="flex items-center gap-3 px-5 py-3 flex-wrap">
       <div class="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center shrink-0">
         <i data-lucide="coins" class="w-4 h-4 text-violet-500"></i>
       </div>
@@ -2632,39 +2786,113 @@ async function _renderSuperadminPointsRequests(pending) {
         <p class="text-sm font-medium text-gray-800 truncate">${esc(company?.name || req.company_id)}</p>
         <p class="text-xs text-gray-400 truncate">${esc(requester?.name || 'Admin')} · ${formatTimeAgo(req.created_at)}</p>
       </div>
-      <span class="text-sm font-bold text-violet-700 shrink-0">${req.points.toLocaleString('es-AR')} puntos</span>
-      <div class="flex gap-2 shrink-0">
-        <button onclick='rejectPointsPurchaseRequest(${JSON.stringify(req.id)})' class="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition">Rechazar</button>
-        <button onclick='approvePointsPurchaseRequest(${JSON.stringify(req.id)})' class="px-3 py-1.5 rounded-lg bg-violet-500 text-white text-xs font-semibold hover:opacity-90 transition">Aprobar</button>
+      <span class="text-sm font-bold text-violet-700 shrink-0">${req.points.toLocaleString('es-AR')} pts</span>
+      <span class="px-2 py-0.5 rounded-full text-xs font-semibold shrink-0 ${st.chipCls}">${st.label}</span>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <span class="text-xs text-gray-400">Cambiar a</span>
+        <select
+          data-req-id="${req.id}"
+          data-requested-by="${req.requested_by || ''}"
+          onchange="_onPtsStatusChangeByEl(this, this.value)"
+          class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 cursor-pointer">
+          <option value="">— Estado —</option>
+          ${opts}
+        </select>
       </div>
     </div>`;
   }).join('');
   lucide.createIcons();
 }
 
+function _onPtsStatusChangeByEl(selectEl, status) {
+  selectEl.value = '';
+  if (!status) return;
+  const id          = selectEl.getAttribute('data-req-id');
+  const requestedBy = selectEl.getAttribute('data-requested-by') || null;
+  if (!id || id === 'null' || id === 'undefined') { showErrorToast('No se pudo identificar la solicitud'); return; }
+  _onPtsStatusChange(id, status, requestedBy, selectEl);
+}
+
+let _rejectPtsRequestId   = null;
+let _rejectPtsRequestedBy = null;
+
+function _onPtsStatusChange(id, status, requestedBy, selectEl) {
+  if (!status) return;
+  selectEl.value = '';
+  if (status === 'rechazado') {
+    _openRejectPtsModal(id, requestedBy);
+  } else {
+    updatePointsRequestStatus(id, status, requestedBy);
+  }
+}
+
+function _openRejectPtsModal(id, requestedBy) {
+  _rejectPtsRequestId   = id;
+  _rejectPtsRequestedBy = requestedBy;
+  const modal = document.getElementById('reject-pts-modal');
+  const textarea = document.getElementById('reject-pts-reason');
+  const btn = document.getElementById('reject-pts-confirm-btn');
+  if (!modal) return;
+  textarea.value = '';
+  btn.disabled = true;
+  modal.classList.remove('hidden');
+  lucide.createIcons();
+  setTimeout(() => textarea.focus(), 50);
+}
+
+function closeRejectPtsModal() {
+  document.getElementById('reject-pts-modal')?.classList.add('hidden');
+  _rejectPtsRequestId   = null;
+  _rejectPtsRequestedBy = null;
+}
+
+async function confirmRejectPtsRequest() {
+  const reason = document.getElementById('reject-pts-reason').value.trim();
+  if (!reason || !_rejectPtsRequestId) return;
+  const id          = _rejectPtsRequestId;
+  const requestedBy = _rejectPtsRequestedBy;
+  closeRejectPtsModal();
+  await updatePointsRequestStatus(id, 'rechazado', requestedBy, reason);
+}
+
 async function approvePointsPurchaseRequest(id) {
-  await _processPointsPurchaseRequest(id, 'approved');
+  await updatePointsRequestStatus(id, 'acreditado');
 }
 
 async function rejectPointsPurchaseRequest(id) {
-  await _processPointsPurchaseRequest(id, 'rejected');
+  _openRejectPtsModal(id, null);
 }
 
-async function _processPointsPurchaseRequest(id, status) {
-  const { isOk } = await window.pointsRequestSdk.updateStatus(id, status, currentUser?.__backendId);
-  if (!isOk) { showErrorToast('No se pudo actualizar la solicitud'); return; }
+async function updatePointsRequestStatus(id, status, requestedBy, rejectionReason) {
+  _log('[updatePtsStatus] id:', id, 'status:', status);
+  if (!status) return;
+  if (!id || typeof id !== 'string') { showErrorToast('No se pudo identificar la solicitud'); return; }
+  const processedBy = currentUser?.__backendId || null;
+  const { isOk, errorMsg } = await window.pointsRequestSdk.updateStatus(id, status, processedBy, rejectionReason || null);
+  if (!isOk) { showErrorToast('No se pudo actualizar la solicitud: ' + (errorMsg || 'error desconocido')); return; }
 
-  // Notify the requesting admin
-  const { data: req } = await _sb.from('points_purchase_requests').select('*').eq('id', id).maybeSingle();
-  if (req?.requested_by) {
-    window.notificationSdk.send([{
-      user_id: req.requested_by,
-      type:    status === 'approved' ? 'points_purchase_approved' : 'points_purchase_rejected',
-      data:    { points: req.points },
-    }]).catch(_log);
+  const st = _PTS_REQ_STATUS[status] || _PTS_REQ_STATUS.pending;
+
+  // Fetch row for notification data (requested_by + points)
+  const { data: ptsRow } = await _sb
+    .from('points_purchase_requests')
+    .select('requested_by, points')
+    .eq('id', id)
+    .maybeSingle();
+
+  const targetUserId = requestedBy || ptsRow?.requested_by;
+  if (targetUserId) {
+    const notifType = (status === 'acreditado' || status === 'approved') ? 'points_purchase_approved'
+                    : (status === 'rechazado'  || status === 'rejected')  ? 'points_purchase_rejected'
+                    : 'points_purchase_status_update';
+    await window.notificationSdk.send([{
+      user_id: targetUserId,
+      type:    notifType,
+      data:    { points: ptsRow?.points, status, status_label: st.label, rejection_reason: rejectionReason || null },
+    }]);
   }
 
-  showSuccessToast(status === 'approved' ? 'Solicitud aprobada' : 'Solicitud rechazada');
+  showSuccessToast(`Solicitud marcada como: ${st.label}`);
   renderPointsPage();
 }
 

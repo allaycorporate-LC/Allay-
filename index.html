@@ -54,7 +54,7 @@
     }
   </script>
 
-  <script src="_sdk/data_sdk.js?v=58" type="text/javascript"></script>
+  <script src="_sdk/data_sdk.js?v=61" type="text/javascript"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
@@ -345,6 +345,21 @@
           <i data-lucide="bar-chart-2" class="w-4 h-4 shrink-0"></i> <span class="nav-label">Analytics</span>
         </a>
       </nav>
+
+      <!-- Points widget -->
+      <div id="pts-widget" class="hidden mx-3 mb-1 shrink-0 rounded-xl border border-violet-100 bg-violet-50/60 overflow-hidden" style="position:relative;z-index:1;">
+        <button onclick="togglePtsWidget()" class="w-full flex items-center justify-between px-3 py-2.5 hover:bg-violet-100/50 transition">
+          <div class="flex items-center gap-2 min-w-0">
+            <i data-lucide="coins" class="w-4 h-4 shrink-0 text-violet-500"></i>
+            <span class="text-xs font-semibold text-violet-700 truncate">Mis puntos</span>
+            <span id="pts-widget-balance" class="text-xs font-black text-violet-600 bg-white border border-violet-200 px-1.5 py-0.5 rounded-full shrink-0 leading-none">0</span>
+          </div>
+          <i id="pts-widget-chevron" data-lucide="chevron-down" class="w-3.5 h-3.5 text-violet-400 shrink-0 transition-transform duration-200"></i>
+        </button>
+        <div id="pts-widget-body" class="hidden border-t border-violet-100">
+          <div id="pts-widget-list" class="px-2 py-2 space-y-0.5 max-h-52 overflow-y-auto"></div>
+        </div>
+      </div>
 
       <!-- Toggle button -->
       <div class="border-t border-gray-100 p-2 shrink-0" style="position:relative;z-index:1;background:transparent;">
@@ -1118,18 +1133,20 @@
               <span id="points-toggle-dot" class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 translate-x-1"></span>
             </button>
           </div>
-          <!-- Slider (hidden by default) -->
-          <div id="points-slider-wrap" class="hidden mt-4">
-            <div class="flex items-center gap-3">
-              <input type="range" id="points-slider" min="5" max="50" value="25" step="5"
-                class="flex-1 accent-violet-500" oninput="updatePointsSlider(this.value)">
-              <input type="number" id="points-val" min="5" max="50" value="25" step="5"
-                class="text-lg font-bold text-violet-600 w-14 text-center border border-violet-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+          <!-- Points picker (hidden by default) -->
+          <div id="points-slider-wrap" class="hidden mt-4 space-y-3">
+            <!-- Preset buttons -->
+            <div id="points-preset-btns" class="flex flex-wrap gap-2"></div>
+            <!-- Manual input + max hint -->
+            <div class="flex items-center gap-2">
+              <input type="number" id="points-val" min="100" max="50000" value="2500"
+                class="text-lg font-bold text-violet-600 w-24 text-center border border-violet-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white py-1.5"
                 oninput="updatePointsFromInput(this.value)"
                 onblur="clampPointsInput()">
-              <span class="text-xs text-gray-400">puntos</span>
+              <span class="text-sm text-gray-400">puntos</span>
+              <span id="points-max-hint" class="text-xs text-gray-400 ml-auto"></span>
             </div>
-            <p id="points-warning" class="text-xs text-red-500 mt-1 hidden">No tenés suficientes puntos</p>
+            <p id="points-warning" class="text-xs text-red-500 hidden">No tenés suficientes puntos</p>
           </div>
         </div>
         </div><!-- /modal-points-section -->
@@ -2021,6 +2038,61 @@
     <div class="px-6 py-4 border-t border-gray-100 shrink-0 flex gap-3">
       <button onclick="closeNotifSettings()" class="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
       <button onclick="saveNotifPrefs()" class="flex-1 py-2.5 rounded-xl bg-[#3d2b56] text-white text-sm font-semibold hover:bg-[#2e1f42] transition">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Image cropper modal -->
+<div id="img-cropper-modal" class="hidden fixed inset-0 z-[220] flex items-center justify-center p-4" style="background:rgba(15,10,30,.7);backdrop-filter:blur(4px)">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+      <div>
+        <h3 class="font-bold text-gray-800 text-base">Ajustar imagen</h3>
+        <p class="text-xs text-gray-400 mt-0.5">Recortá, girá y encuadrá antes de guardar</p>
+      </div>
+      <button onclick="closeCropperModal()" class="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+    <!-- Canvas area -->
+    <div class="bg-gray-900" style="height:340px;max-height:50vh;">
+      <img id="cropper-source-img" src="" alt="" style="display:block;max-width:100%;">
+    </div>
+    <!-- Controls -->
+    <div class="flex items-center justify-center gap-1 px-5 py-3 bg-gray-50 border-t border-gray-100">
+      <button onclick="_cropperAction('rotate',-90)" title="Girar izquierda" class="p-2.5 rounded-xl hover:bg-gray-200 text-gray-500 transition">
+        <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+      </button>
+      <button onclick="_cropperAction('rotate',90)" title="Girar derecha" class="p-2.5 rounded-xl hover:bg-gray-200 text-gray-500 transition">
+        <i data-lucide="rotate-cw" class="w-4 h-4"></i>
+      </button>
+      <div class="w-px h-5 bg-gray-200 mx-1"></div>
+      <button onclick="_cropperAction('zoom',0.15)" title="Acercar" class="p-2.5 rounded-xl hover:bg-gray-200 text-gray-500 transition">
+        <i data-lucide="zoom-in" class="w-4 h-4"></i>
+      </button>
+      <button onclick="_cropperAction('zoom',-0.15)" title="Alejar" class="p-2.5 rounded-xl hover:bg-gray-200 text-gray-500 transition">
+        <i data-lucide="zoom-out" class="w-4 h-4"></i>
+      </button>
+      <div class="w-px h-5 bg-gray-200 mx-1"></div>
+      <button onclick="_cropperAction('flipX')" title="Voltear horizontal" class="p-2.5 rounded-xl hover:bg-gray-200 text-gray-500 transition">
+        <i data-lucide="flip-horizontal-2" class="w-4 h-4"></i>
+      </button>
+      <button onclick="_cropperAction('reset')" title="Restablecer" class="p-2.5 rounded-xl hover:bg-gray-200 text-gray-500 transition">
+        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+      </button>
+      <div class="w-px h-5 bg-gray-200 mx-2"></div>
+      <span class="text-[11px] text-gray-400">Arrastrá para mover · Pinzá para zoom</span>
+    </div>
+    <!-- Footer -->
+    <div class="flex gap-3 px-5 py-4 border-t border-gray-100 shrink-0">
+      <button onclick="closeCropperModal()" class="flex-1 py-2.5 rounded-xl text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 transition">
+        Cancelar
+      </button>
+      <button onclick="saveCroppedImage()" id="cropper-save-btn"
+        class="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 transition flex items-center justify-center gap-2">
+        <i data-lucide="check" class="w-4 h-4"></i> Guardar imagen
+      </button>
     </div>
   </div>
 </div>
@@ -3300,6 +3372,9 @@
         <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
       </button>
       <h2 class="text-lg font-bold text-gray-800 flex-1">Gestión de puntos</h2>
+      <button onclick="openPtsOrdersPage()" id="pts-orders-nav-btn" class="hidden items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition">
+        <i data-lucide="list" class="w-4 h-4"></i> <span id="pts-orders-nav-label">Mis solicitudes</span>
+      </button>
       <button onclick="openBuyPointsModal()" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-semibold shadow hover:opacity-90 transition">
         <i data-lucide="plus" class="w-4 h-4"></i> Comprar puntos
       </button>
@@ -3308,14 +3383,11 @@
 
   <div class="flex-1 p-4 md:p-6 max-w-5xl mx-auto w-full">
 
-    <!-- Pending request banner (admin) -->
-    <div id="points-request-banner" class="hidden mb-6"></div>
-
-    <!-- Pending requests (superadmin only) -->
+    <!-- Active requests queue (superadmin only) -->
     <div id="points-superadmin-requests" class="hidden bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-6">
       <div class="px-5 py-4 border-b border-gray-50">
-        <h3 class="font-bold text-gray-800 text-sm">Solicitudes de compra de puntos</h3>
-        <p class="text-xs text-gray-400 mt-0.5">Pendientes de aprobación de todas las empresas</p>
+        <h3 class="font-bold text-gray-800 text-sm">Solicitudes activas de puntos</h3>
+        <p class="text-xs text-gray-400 mt-0.5">En curso de todas las empresas</p>
       </div>
       <div id="points-superadmin-requests-list" class="divide-y divide-gray-50"></div>
     </div>
@@ -3423,6 +3495,43 @@
 </div>
 
 <!-- ══════════════════════════════════════
+     MIS SOLICITUDES DE PUNTOS PAGE
+══════════════════════════════════════ -->
+<div id="pts-orders-page" class="hidden fixed inset-0 bg-gray-50 flex flex-col" style="z-index:45;">
+
+  <!-- Header -->
+  <div class="bg-white border-b border-gray-100 shadow-sm sticky top-0 z-10 shrink-0">
+    <div class="flex items-center justify-between px-4 md:px-6 h-16">
+      <div class="flex items-center gap-3">
+        <button onclick="closePtsOrdersPage()" class="p-2 rounded-full hover:bg-gray-100 transition">
+          <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+        </button>
+        <h2 class="text-base font-bold text-gray-800">Mis solicitudes de puntos</h2>
+      </div>
+      <button onclick="openBuyPointsModal()" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-semibold shadow hover:opacity-90 transition">
+        <i data-lucide="plus" class="w-4 h-4"></i> Nueva solicitud
+      </button>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="flex-1 overflow-y-auto">
+    <div id="pts-orders-list" class="max-w-2xl mx-auto w-full p-4 md:p-6 space-y-3"></div>
+    <div id="pts-orders-empty" class="hidden max-w-2xl mx-auto w-full p-4 md:p-6">
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-14 text-center">
+        <i data-lucide="inbox" class="w-10 h-10 text-gray-300 mx-auto mb-3"></i>
+        <p class="font-bold text-gray-700 mb-1">Sin solicitudes todavía</p>
+        <p class="text-sm text-gray-400 mb-6">Comprá puntos para distribuir entre tus empleados.</p>
+        <button onclick="openBuyPointsModal()" class="px-5 py-2 rounded-full bg-violet-500 text-white text-sm font-bold hover:opacity-90 transition">
+          Comprar puntos
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════
      BUY POINTS MODAL
 ══════════════════════════════════════ -->
 <div id="buy-points-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -3443,17 +3552,17 @@
       <!-- Packages -->
       <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Paquetes</p>
       <div class="grid grid-cols-3 gap-2 mb-5">
-        <button onclick="selectPointsPackage(500)" class="points-pkg border-2 border-gray-200 rounded-xl p-3 text-center hover:border-violet-400 hover:bg-violet-50 transition" data-pts="500">
-          <p class="text-lg font-bold text-gray-800">500</p>
-          <p class="text-[11px] text-gray-400">puntos</p>
+        <button onclick="selectPointsPackage(25000)" class="points-pkg border-2 border-gray-200 rounded-xl p-3 text-center hover:border-violet-400 hover:bg-violet-50 transition" data-pts="25000">
+          <p class="text-lg font-bold text-gray-800">25.000</p>
+          <p class="text-[11px] text-gray-400">Starter</p>
         </button>
-        <button onclick="selectPointsPackage(1000)" class="points-pkg border-2 border-gray-200 rounded-xl p-3 text-center hover:border-violet-400 hover:bg-violet-50 transition" data-pts="1000">
-          <p class="text-lg font-bold text-gray-800">1.000</p>
-          <p class="text-[11px] text-violet-500 font-medium">Popular</p>
+        <button onclick="selectPointsPackage(75000)" class="points-pkg border-2 border-gray-200 rounded-xl p-3 text-center hover:border-violet-400 hover:bg-violet-50 transition" data-pts="75000">
+          <p class="text-lg font-bold text-gray-800">75.000</p>
+          <p class="text-[11px] text-violet-500 font-medium">Growth ✦</p>
         </button>
-        <button onclick="selectPointsPackage(5000)" class="points-pkg border-2 border-gray-200 rounded-xl p-3 text-center hover:border-violet-400 hover:bg-violet-50 transition" data-pts="5000">
-          <p class="text-lg font-bold text-gray-800">5.000</p>
-          <p class="text-[11px] text-gray-400">puntos</p>
+        <button onclick="selectPointsPackage(200000)" class="points-pkg border-2 border-gray-200 rounded-xl p-3 text-center hover:border-violet-400 hover:bg-violet-50 transition" data-pts="200000">
+          <p class="text-lg font-bold text-gray-800">200.000</p>
+          <p class="text-[11px] text-gray-400">Scale</p>
         </button>
       </div>
 
@@ -3461,9 +3570,16 @@
       <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">O ingresá una cantidad</p>
       <div class="relative mb-5">
         <i data-lucide="coins" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
-        <input id="buy-points-input" type="number" min="100" step="100" placeholder="Ej: 2000"
+        <input id="buy-points-input" type="number" min="1000" step="1000" placeholder="Ej: 10000"
           autocomplete="off" oninput="onBuyPointsInput()"
           class="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition">
+      </div>
+
+      <!-- Optional message -->
+      <div class="mb-5">
+        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">Mensaje opcional</label>
+        <textarea id="buy-points-message" rows="2" placeholder="Ej: Necesito los puntos para el cierre de trimestre..."
+          class="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition"></textarea>
       </div>
 
       <!-- Summary -->
@@ -3483,7 +3599,36 @@
   </div>
 </div>
 
-<script src="js/app.js?v=210"></script>
-<script src="js/analytics.js?v=12"></script>
+<!-- ══════════════════════════════════════
+     REJECT POINTS REQUEST MODAL
+══════════════════════════════════════ -->
+<div id="reject-pts-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeRejectPtsModal()"></div>
+  <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm z-10 p-6">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+        <i data-lucide="x-circle" class="w-5 h-5 text-red-500"></i>
+      </div>
+      <div>
+        <h3 class="font-bold text-gray-800">Rechazar solicitud</h3>
+        <p class="text-xs text-gray-400 mt-0.5">El admin recibirá el motivo por notificación</p>
+      </div>
+    </div>
+    <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Motivo del rechazo <span class="text-red-500">*</span></label>
+    <textarea id="reject-pts-reason" rows="3" placeholder="Ej: Documentación incompleta, pendiente de verificación..."
+      oninput="document.getElementById('reject-pts-confirm-btn').disabled = !this.value.trim()"
+      class="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-300 focus:border-transparent transition mb-4"></textarea>
+    <div class="flex gap-3">
+      <button onclick="closeRejectPtsModal()" class="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">Cancelar</button>
+      <button id="reject-pts-confirm-btn" onclick="confirmRejectPtsRequest()" disabled
+        class="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed">
+        Rechazar
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="js/app.js?v=221"></script>
+<script src="js/analytics.js?v=18"></script>
 </body>
 </html>

@@ -20,6 +20,7 @@ function _applySidebarState() {
     // 1. Hide text immediately (before transition)
     sidebar.querySelectorAll('.nav-section-divider').forEach(el => el.style.display = 'none');
     sidebar.querySelectorAll('.nav-label').forEach(el => el.style.display = 'none');
+    document.getElementById('pts-widget')?.classList.add('hidden');
     sidebar.querySelectorAll('.nav-link').forEach(el => {
       el.style.justifyContent = 'center';
       el.style.paddingLeft    = '0';
@@ -44,6 +45,7 @@ function _applySidebarState() {
     setTimeout(() => {
       sidebar.querySelectorAll('.nav-section-divider').forEach(el => el.style.display = '');
       sidebar.querySelectorAll('.nav-label').forEach(el => el.style.display = '');
+      _updatePtsWidgetVisibility();
       sidebar.querySelectorAll('.nav-link').forEach(el => {
         el.style.justifyContent = '';
         el.style.paddingLeft    = '';
@@ -59,7 +61,7 @@ function _closeAllOverlays() {
   const ids = ['profile-page','admin-page','analytics-page','store-page',
                 'notifications-page','programs-page','approvals-page','points-page',
                 'user-profile-page','other-profile-page','superadmin-ar-page',
-                'cart-page','orders-page'];
+                'cart-page','orders-page','pts-orders-page'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.classList.add('hidden'); el.style.display = 'none'; }
@@ -139,13 +141,18 @@ let currentUser = null;
 let _companyMemberIds = null; // pre-computed Set, rebuilt only when allUsers changes
 let originalSuperadminUser = null;
 let isImpersonating = false;
+const PTS_PER_USD = 500;
 let _storeEnabled = true; // per-company flag: false = tienda y puntos desactivados
+let _companyAwardMinPts = 2500;  // default $5 USD
+let _companyAwardMaxPts = 10000; // default $20 USD
+let _modalAvailPts = 0;          // points_to_give snapshot taken when recognition modal opens
 let allUsers = [];
 let isLoggedIn = false;
 let _approvalsQueue   = [];
 let _approvalsHistory = [];
 let notificationsTab = 'all';
 let sidebarCollapsed = false;
+let _ptsWidgetOpen = false;
 
 // ── HTML escape ──────────────────────────────────────────────────────────────
 function esc(str) {
@@ -295,7 +302,7 @@ async function handleLogin(e) {
       loadNotifications();
       loadCompanyPrograms().then(() => _loadApprovals());
       loadHomeSidebar();
-      loadCurrentCompanySettings();
+      loadCurrentCompanySettings().then(() => _updatePtsWidgetVisibility());
       _setupFeedRealtime();
       _setupCommentsRealtime();
       _setupNotificationsRealtime();
@@ -455,12 +462,16 @@ async function loadCurrentCompanySettings() {
   const cached = _companiesData.find(c => c.id === companyId);
   if (cached) {
     _storeEnabled = cached.store_enabled !== false;
+    _companyAwardMinPts = cached.award_min_pts ?? 2500;
+    _companyAwardMaxPts = cached.award_max_pts ?? 10000;
     _applyStoreMode();
     return;
   }
 
   const { isOk, data } = await window.companySdk.getById(companyId);
   _storeEnabled = (isOk && data) ? data.store_enabled !== false : true;
+  _companyAwardMinPts = (isOk && data) ? (data.award_min_pts ?? 2500) : 2500;
+  _companyAwardMaxPts = (isOk && data) ? (data.award_max_pts ?? 10000) : 10000;
   _applyStoreMode();
 }
 
@@ -479,6 +490,8 @@ function _applyStoreMode() {
     const showBanner = !_storeEnabled && currentUser?.role === 'admin' && !isImpersonating;
     banner.classList.toggle('hidden', !showBanner);
   }
+
+  _updatePtsWidgetVisibility();
 }
 
 function logout() {
@@ -3006,13 +3019,15 @@ let _auditPage = 0;
 const _AUDIT_PAGE_SIZE = 50;
 
 const _AUDIT_LABELS = {
-  'user.create':         { label: 'Usuario creado',              icon: 'user-plus',     color: 'text-green-600 bg-green-50' },
-  'user.delete':         { label: 'Usuario eliminado',           icon: 'user-x',        color: 'text-red-600 bg-red-50'     },
-  'role.change':         { label: 'Rol cambiado',                icon: 'shield',        color: 'text-blue-600 bg-blue-50'   },
+  'user.create':         { label: 'Usuario creado',              icon: 'user-plus',     color: 'text-green-600 bg-green-50'   },
+  'user.delete':         { label: 'Usuario eliminado',           icon: 'user-x',        color: 'text-red-600 bg-red-50'       },
+  'role.change':         { label: 'Rol cambiado',                icon: 'shield',        color: 'text-blue-600 bg-blue-50'     },
   'csv.approve':         { label: 'CSV aprobado',                icon: 'file-check-2',  color: 'text-violet-600 bg-violet-50' },
   'csv.reject':          { label: 'CSV rechazado',               icon: 'file-x-2',      color: 'text-orange-600 bg-orange-50' },
-  'recognition.delete':  { label: 'Reconocimiento eliminado',    icon: 'trophy',        color: 'text-amber-600 bg-amber-50' },
-  'comment.delete':      { label: 'Comentario eliminado',        icon: 'message-x',     color: 'text-gray-600 bg-gray-100'  },
+  'recognition.delete':  { label: 'Reconocimiento eliminado',    icon: 'trophy',        color: 'text-amber-600 bg-amber-50'   },
+  'comment.delete':      { label: 'Comentario eliminado',        icon: 'message-x',     color: 'text-gray-600 bg-gray-100'    },
+  'impersonate.start':   { label: 'Impersonación iniciada',      icon: 'user-check',    color: 'text-indigo-600 bg-indigo-50' },
+  'impersonate.end':     { label: 'Impersonación finalizada',    icon: 'log-out',       color: 'text-indigo-400 bg-indigo-50' },
 };
 
 async function loadAuditLog() {
@@ -3085,6 +3100,8 @@ function _auditDetail(entry) {
     case 'csv.reject':   return `${m.row_count || 0} filas${m.rejection_reason ? ' · ' + m.rejection_reason : ''}`;
     case 'recognition.delete': return `programa: ${entry.target_name || ''} · ${m.points || 0} pts`;
     case 'comment.delete':     return entry.target_name || '';
+    case 'impersonate.start':  return `Impersonó a: ${m.impersonated_email || entry.target_name || ''}${m.impersonated_role ? ' (' + m.impersonated_role + ')' : ''}`;
+    case 'impersonate.end':    return `Terminó sesión como: ${m.impersonated_email || entry.target_name || ''}`;
     default: return entry.target_id || '';
   }
 }
@@ -3742,27 +3759,52 @@ function renderCompaniesList() {
     return;
   }
 
+  const _AWARD_MIN_OPTS = [
+    { pts: 2500, label: 'Mín $5' },
+    { pts: 5000, label: 'Mín $10' },
+    { pts: 7500, label: 'Mín $15' },
+  ];
+  const _AWARD_MAX_OPTS = [
+    { pts: 5000,  label: 'Máx $10' },
+    { pts: 10000, label: 'Máx $20' },
+    { pts: 15000, label: 'Máx $30' },
+    { pts: 25000, label: 'Máx $50' },
+  ];
+
   const rows = paged.map(c => {
     const storeOn = c.store_enabled !== false;
     const empCount = allUsers.filter(u => u.company_id === c.id && u.role !== 'superadmin').length;
+    const curMin = c.award_min_pts ?? 2500;
+    const curMax = c.award_max_pts ?? 10000;
+    const minOpts = _AWARD_MIN_OPTS.map(o => `<option value="${o.pts}" ${o.pts === curMin ? 'selected' : ''}>${o.label}</option>`).join('');
+    const maxOpts = _AWARD_MAX_OPTS.map(o => `<option value="${o.pts}" ${o.pts === curMax ? 'selected' : ''}>${o.label}</option>`).join('');
     return `
-    <div class="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-gray-200 bg-gray-50">
-      <div class="w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center shrink-0">
-        <i data-lucide="building-2" class="w-4 h-4 text-violet-500"></i>
+    <div class="flex flex-col gap-2 p-3 rounded-xl border border-gray-100 hover:border-gray-200 bg-gray-50">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center shrink-0">
+          <i data-lucide="building-2" class="w-4 h-4 text-violet-500"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-gray-800">${esc(c.name)}</p>
+          <p class="text-xs text-gray-400"><span class="font-mono bg-gray-100 px-1 rounded">${esc(c.id)}</span> &nbsp;·&nbsp; ${esc(c.domain)} &nbsp;·&nbsp; <i data-lucide="users" class="w-3 h-3 inline-block -mt-0.5"></i> ${empCount} empleado${empCount !== 1 ? 's' : ''}</p>
+        </div>
+        <button onclick="toggleCompanyStore('${esc(c.id)}', ${!storeOn})"
+          title="${storeOn ? 'Desactivar tienda y puntos' : 'Activar tienda y puntos'}"
+          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition shrink-0 ${storeOn ? 'bg-green-50 text-green-600 hover:bg-green-100 border border-green-200' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 border border-gray-200'}">
+          <i data-lucide="${storeOn ? 'shopping-bag' : 'shopping-bag-x'}" class="w-3.5 h-3.5"></i>
+          ${storeOn ? 'Tienda ON' : 'Tienda OFF'}
+        </button>
+        <button onclick="deleteCompany('${esc(c.id)}')" class="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition" title="Eliminar empresa">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+        </button>
       </div>
-      <div class="flex-1 min-w-0">
-        <p class="text-sm font-semibold text-gray-800">${esc(c.name)}</p>
-        <p class="text-xs text-gray-400"><span class="font-mono bg-gray-100 px-1 rounded">${esc(c.id)}</span> &nbsp;·&nbsp; ${esc(c.domain)} &nbsp;·&nbsp; <i data-lucide="users" class="w-3 h-3 inline-block -mt-0.5"></i> ${empCount} empleado${empCount !== 1 ? 's' : ''}</p>
+      <div class="flex items-center gap-2 pl-12">
+        <span class="text-xs text-gray-400 shrink-0">Rango de award:</span>
+        <select id="award-min-${esc(c.id)}" class="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">${minOpts}</select>
+        <span class="text-xs text-gray-300">→</span>
+        <select id="award-max-${esc(c.id)}" class="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">${maxOpts}</select>
+        <button onclick="saveCompanyAwardRange('${esc(c.id)}')" class="shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold bg-violet-100 text-violet-700 hover:bg-violet-200 transition">Guardar</button>
       </div>
-      <button onclick="toggleCompanyStore('${esc(c.id)}', ${!storeOn})"
-        title="${storeOn ? 'Desactivar tienda y puntos' : 'Activar tienda y puntos'}"
-        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition shrink-0 ${storeOn ? 'bg-green-50 text-green-600 hover:bg-green-100 border border-green-200' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 border border-gray-200'}">
-        <i data-lucide="${storeOn ? 'shopping-bag' : 'shopping-bag-x'}" class="w-3.5 h-3.5"></i>
-        ${storeOn ? 'Tienda ON' : 'Tienda OFF'}
-      </button>
-      <button onclick="deleteCompany('${esc(c.id)}')" class="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition" title="Eliminar empresa">
-        <i data-lucide="trash-2" class="w-4 h-4"></i>
-      </button>
     </div>`;
   }).join('');
 
@@ -3788,6 +3830,20 @@ async function toggleCompanyStore(companyId, enable) {
   if (idx !== -1) _companiesData[idx].store_enabled = enable;
   renderCompaniesList();
   showSuccessToast(enable ? `Tienda activada para ${_companiesData[idx]?.name || companyId}` : `Tienda desactivada para ${_companiesData[idx]?.name || companyId}`);
+}
+
+async function saveCompanyAwardRange(companyId) {
+  const minEl = document.getElementById(`award-min-${companyId}`);
+  const maxEl = document.getElementById(`award-max-${companyId}`);
+  if (!minEl || !maxEl) return;
+  const minPts = parseInt(minEl.value);
+  const maxPts = parseInt(maxEl.value);
+  if (minPts >= maxPts) { showErrorToast('El mínimo debe ser menor que el máximo'); return; }
+  const { isOk } = await window.companySdk.update(companyId, { award_min_pts: minPts, award_max_pts: maxPts });
+  if (!isOk) { showErrorToast('No se pudo guardar el rango'); return; }
+  const idx = _companiesData.findIndex(c => c.id === companyId);
+  if (idx !== -1) { _companiesData[idx].award_min_pts = minPts; _companiesData[idx].award_max_pts = maxPts; }
+  showSuccessToast('Rango de award actualizado');
 }
 
 function toggleCreateCompanyForm() {
@@ -3880,6 +3936,19 @@ function impersonateEmployee(empBackendId) {
   const emp = allUsers.find(e => e.__backendId === empBackendId);
   if (!emp) { showErrorToast('Empleado no encontrado'); return; }
 
+  // Audit log BEFORE changing currentUser (actor = superadmin)
+  window.auditSdk?.log({
+    actorId:    currentUser.__backendId,
+    actorEmail: currentUser.email,
+    actorRole:  'superadmin',
+    action:     'impersonate.start',
+    targetId:   emp.__backendId,
+    targetType: 'user',
+    targetName: emp.name,
+    companyId:  emp.company_id,
+    metadata:   { impersonated_email: emp.email, impersonated_role: emp.role || 'employee' },
+  });
+
   currentUser = {
     name: emp.name, email: emp.email, department: emp.department,
     company_id: emp.company_id, role: emp.role || 'employee',
@@ -3931,20 +4000,40 @@ function updateImpersonationBanner() {
 
 function returnToSuperadmin() {
   if (!originalSuperadminUser) { showErrorToast('No hay cuenta de superadmin para volver'); return; }
+
+  // Audit log BEFORE restoring (currentUser is still the impersonated user)
+  window.auditSdk?.log({
+    actorId:    originalSuperadminUser.__backendId,
+    actorEmail: originalSuperadminUser.email,
+    actorRole:  'superadmin',
+    action:     'impersonate.end',
+    targetId:   currentUser.__backendId,
+    targetType: 'user',
+    targetName: currentUser.name,
+    companyId:  currentUser.company_id,
+    metadata:   { impersonated_email: currentUser.email, session_duration_approx: 'manual' },
+  });
+
   currentUser = { ...originalSuperadminUser };
   originalSuperadminUser = null;
   isImpersonating = false;
   document.body.classList.add('is-superadmin');
   _storeEnabled = true;
   _applyStoreMode();
+  _closeAllOverlays();
   filterEmployeesByCompany();
   renderEmployeesList();
   updateImpersonationBanner();
   updateAdminVisibility();
   updateProfileDisplay();
   showSuccessToast(`Volviste a tu cuenta: ${currentUser.name}`);
+  switchPage('home');
+  renderFeed(true);
+  loadHomeSidebar();
   loadNotifications();
+  _loadApprovals();
   _setupFeedRealtime();
+  _setupCommentsRealtime();
   _setupNotificationsRealtime();
   renderRecognitionBattery();
   lucide.createIcons();
@@ -3990,16 +4079,13 @@ function openModal() {
   const msgEl = document.getElementById('recog-message');
   if (msgEl) { msgEl.value = ''; msgEl.blur(); }
 
-  const availPts = currentUser?.points_to_give ?? 0;
-  const initPts  = Math.min(25, availPts);
-  const slider = document.getElementById('points-slider');
-  slider.min   = 5;
-  slider.max   = availPts;
-  slider.value = initPts;
+  _modalAvailPts = currentUser?.points_to_give ?? 0;
+  const initPts  = Math.min(_companyAwardMinPts, _modalAvailPts);
   document.getElementById('points-val').value = initPts;
+  _renderPointsPresets(initPts);
   document.getElementById('points-warning').classList.add('hidden');
   const modalPtsAvail = document.getElementById('modal-pts-available');
-  if (modalPtsAvail) modalPtsAvail.textContent = availPts;
+  if (modalPtsAvail) modalPtsAvail.textContent = _modalAvailPts;
 
   // Disable toggle if user has no points
   const toggleBtn = document.getElementById('points-toggle');
@@ -4038,13 +4124,13 @@ function togglePointsSwitch() {
   const isOn = btn.getAttribute('aria-checked') === 'true';
   _setPointsSwitch(!isOn);
   if (!isOn) {
-    // Turning ON: start at 10 pts (or max available if less than 10)
-    const avail  = currentUser?.points_to_give ?? 0;
-    const start  = Math.min(10, avail);
-    const slider = document.getElementById('points-slider');
-    slider.value = start;
+    _modalAvailPts = currentUser?.points_to_give ?? 0;
+    const start = Math.min(_companyAwardMinPts, _modalAvailPts);
     document.getElementById('points-val').value = start;
-    updatePointsSlider(start);
+    const modalPtsAvail = document.getElementById('modal-pts-available');
+    if (modalPtsAvail) modalPtsAvail.textContent = _modalAvailPts;
+    _renderPointsPresets(start);
+    _checkPointsValidity(start);
   } else {
     document.getElementById('modal-next').disabled = false;
   }
@@ -4239,30 +4325,78 @@ function prevStep() { if (currentStep > 1) showStep(currentStep - 1); }
 function updatePointsSlider(value) {
   const inp = document.getElementById('points-val');
   if (inp) inp.value = value;
+  _highlightPresetBtn(parseInt(value));
   _checkPointsValidity(parseInt(value));
 }
 
 function updatePointsFromInput(raw) {
-  const avail  = currentUser?.points_to_give ?? 0;
   const parsed = parseInt(raw);
   if (isNaN(parsed)) return;
-  const clamped = Math.max(5, Math.min(parsed, avail));
-  const slider  = document.getElementById('points-slider');
-  if (slider) slider.value = clamped;
-  _checkPointsValidity(clamped);
+  // Don't clamp here (user is mid-typing); just reflect and validate live
+  _highlightPresetBtn(parsed);
+  _checkPointsValidity(parsed);
 }
 
 function clampPointsInput() {
-  const avail  = currentUser?.points_to_give ?? 0;
-  const inp    = document.getElementById('points-val');
-  const slider = document.getElementById('points-slider');
+  const inp = document.getElementById('points-val');
   if (!inp) return;
   let v = parseInt(inp.value);
-  if (isNaN(v) || v < 5) v = 5;
-  if (v > avail) v = avail;
+  if (isNaN(v) || v < _companyAwardMinPts) v = _companyAwardMinPts;
+  if (v > _modalAvailPts) v = _modalAvailPts;
   inp.value = v;
-  if (slider) slider.value = v;
+  _highlightPresetBtn(v);
   _checkPointsValidity(v);
+}
+
+function _renderPointsPresets(selectedPts) {
+  const container = document.getElementById('points-preset-btns');
+  const hint      = document.getElementById('points-max-hint');
+  if (!container) return;
+
+  const STEP_PTS  = PTS_PER_USD * 5;
+  const maxAfford = Math.min(_modalAvailPts, _companyAwardMaxPts);
+
+  if (hint) hint.textContent = `Máximo disponible: ${maxAfford.toLocaleString('es-AR')} puntos`;
+
+  const btns = [];
+  for (let pts = _companyAwardMinPts; pts <= _companyAwardMaxPts; pts += STEP_PTS) {
+    const canAfford  = _modalAvailPts >= pts;
+    const isSelected = pts === selectedPts;
+    btns.push(`<button type="button"
+      onclick="selectPresetPts(${pts})"
+      ${canAfford ? '' : 'disabled'}
+      class="preset-pts-btn px-3 py-2 rounded-xl text-sm font-bold border transition
+        ${isSelected
+          ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
+          : canAfford
+            ? 'bg-white text-violet-700 border-violet-200 hover:bg-violet-50'
+            : 'bg-gray-100 text-gray-300 border-gray-200 cursor-not-allowed opacity-50'}">
+      ${pts.toLocaleString('es-AR')} pts
+    </button>`);
+  }
+  container.innerHTML = btns.join('');
+}
+
+function selectPresetPts(pts) {
+  const inp = document.getElementById('points-val');
+  if (inp) inp.value = pts;
+  _highlightPresetBtn(pts);
+  _checkPointsValidity(pts);
+}
+
+function _highlightPresetBtn(pts) {
+  document.querySelectorAll('.preset-pts-btn').forEach(btn => {
+    const btnPts     = parseInt(btn.getAttribute('onclick')?.match(/\d+/)?.[0]);
+    const isSelected = btnPts === pts;
+    const disabled   = btn.disabled;
+    btn.className = `preset-pts-btn px-3 py-2 rounded-xl text-sm font-bold border transition ${
+      isSelected
+        ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
+        : disabled
+          ? 'bg-gray-100 text-gray-300 border-gray-200 cursor-not-allowed opacity-50'
+          : 'bg-white text-violet-700 border-violet-200 hover:bg-violet-50'
+    }`;
+  });
 }
 
 function _checkPointsValidity(value) {
@@ -4273,7 +4407,7 @@ function _checkPointsValidity(value) {
   if (usingBudget && prog?.custom) {
     ok = _getProgramRemainingBudget(prog) >= value * n;
   } else {
-    ok = currentUser && currentUser.points_to_give >= value * n;
+    ok = _modalAvailPts >= value * n;
   }
   document.getElementById('points-warning').classList.toggle('hidden', ok || !currentUser);
   document.getElementById('modal-next').disabled = !ok && !!currentUser;
@@ -4311,21 +4445,21 @@ function _updateBudgetBanner() {
 }
 
 function toggleBudgetSource() {
-  const using  = document.getElementById('use-program-budget').checked;
-  const prog   = _getProgramByLabel(selectedProgram);
-  const slider = document.getElementById('points-slider');
-  const n      = Math.max(1, _selectedRecipients.length);
+  const using = document.getElementById('use-program-budget').checked;
+  const prog  = _getProgramByLabel(selectedProgram);
+  const n     = Math.max(1, _selectedRecipients.length);
+  const inp   = document.getElementById('points-val');
   if (using && prog) {
-    const remaining  = _getProgramRemainingBudget(prog);
+    const remaining    = _getProgramRemainingBudget(prog);
     const maxPerPerson = Math.floor(remaining / n);
-    slider.max   = maxPerPerson;
-    slider.value = Math.min(parseInt(slider.value), maxPerPerson);
-    document.getElementById('points-val').value = slider.value;
+    const cur = Math.min(parseInt(inp?.value || 0), maxPerPerson);
+    if (inp) inp.value = cur;
     document.getElementById('points-warning').classList.add('hidden');
     document.getElementById('modal-next').disabled = false;
   } else {
-    slider.max = 50;
-    updatePointsSlider(slider.value);
+    const cur = parseInt(inp?.value || _companyAwardMinPts);
+    _renderPointsPresets(cur);
+    _checkPointsValidity(cur);
   }
 }
 
@@ -4378,7 +4512,7 @@ function onPrivateToggle() {
 async function sendRecognition() {
   const message      = document.getElementById('recog-message').value.trim();
   const pointsOn     = document.getElementById('points-toggle')?.getAttribute('aria-checked') === 'true';
-  const points       = pointsOn ? parseInt(document.getElementById('points-slider').value) : 0;
+  const points       = pointsOn ? parseInt(document.getElementById('points-val').value || 0) : 0;
   const usingBudget  = document.getElementById('use-program-budget')?.checked;
   const isPrivate    = document.getElementById('recognition-private')?.checked || false;
   const selectedProg = _getProgramByLabel(selectedProgram);
@@ -4496,6 +4630,7 @@ async function sendRecognition() {
     loadNotifications();
     closeModal();
     renderRecognitionBattery();
+    if (points > 0) refreshPtsWidgetIfOpen();
     const plural = sentCount > 1 ? `a ${sentCount} personas` : `a ${_selectedRecipients[0]?.name}`;
     const successMsg = (usingBudget && selectedProg?.custom)
       ? `¡Reconocimiento enviado ${plural}! -${points * sentCount} puntos del programa`
@@ -4525,10 +4660,68 @@ function updateAllPointsDisplays() {
   if (pGive)   pGive.textContent   = toGive;
   if (pRedeem) pRedeem.textContent = toRedeem;
 
+  const widgetBal = document.getElementById('pts-widget-balance');
+  if (widgetBal) widgetBal.textContent = (toGive ?? 0).toLocaleString('es-AR');
+
   lucide.createIcons();
 }
 
 function updatePointsDisplay() { updateAllPointsDisplays(); }
+
+// ── Points widget (sidebar) ───────────────────────────────────────────────────
+
+function _updatePtsWidgetVisibility() {
+  const el = document.getElementById('pts-widget');
+  if (!el) return;
+  const show = !!(currentUser && !sidebarCollapsed && _storeEnabled &&
+                  !(currentUser.role === 'superadmin' && !isImpersonating));
+  el.classList.toggle('hidden', !show);
+}
+
+function togglePtsWidget() {
+  _ptsWidgetOpen = !_ptsWidgetOpen;
+  const body    = document.getElementById('pts-widget-body');
+  const chevron = document.getElementById('pts-widget-chevron');
+  if (body)    body.classList.toggle('hidden', !_ptsWidgetOpen);
+  if (chevron) chevron.style.transform = _ptsWidgetOpen ? 'rotate(180deg)' : '';
+  if (_ptsWidgetOpen) _fetchAndRenderPtsHistory();
+}
+
+async function _fetchAndRenderPtsHistory() {
+  const listEl = document.getElementById('pts-widget-list');
+  if (!listEl || !currentUser?.__backendId) return;
+
+  listEl.innerHTML = '<p class="text-[10px] text-gray-400 px-1 py-1">Cargando...</p>';
+
+  const { data } = await window.recognitionSdk.sentWithPoints(currentUser.__backendId, 5);
+
+  if (!data || data.length === 0) {
+    listEl.innerHTML = '<p class="text-[10px] text-gray-400 px-1 py-1">No enviaste puntos todavía.</p>';
+    return;
+  }
+
+  listEl.innerHTML = data.map(r => {
+    const toName  = r.to_user?.name || 'Usuario';
+    const first   = toName.split(' ')[0];
+    const initial = first.charAt(0).toUpperCase();
+    const pts     = r.points ?? 0;
+    const time    = formatTimeAgo(r.created_at);
+    return `<div class="flex items-center gap-2 px-1 py-1.5 rounded-lg hover:bg-white/60 transition">
+      <div class="w-6 h-6 rounded-full bg-violet-200 flex items-center justify-center shrink-0 text-[10px] font-bold text-violet-700">${initial}</div>
+      <div class="flex-1 min-w-0">
+        <p class="text-[11px] font-semibold text-gray-700 truncate">${esc(first)}</p>
+        <p class="text-[10px] text-gray-400">${time}</p>
+      </div>
+      <span class="text-[11px] font-bold text-violet-600 shrink-0">−${pts.toLocaleString('es-AR')} pts</span>
+    </div>`;
+  }).join('');
+}
+
+function refreshPtsWidgetIfOpen() {
+  if (_ptsWidgetOpen) _fetchAndRenderPtsHistory();
+  const widgetBal = document.getElementById('pts-widget-balance');
+  if (widgetBal) widgetBal.textContent = (currentUser?.points_to_give ?? 0).toLocaleString('es-AR');
+}
 
 function _weeklyKey() {
   const d = new Date();
@@ -5512,10 +5705,13 @@ function renderNotificationsDropdown() {
       text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó comprar <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> para ${esc(n.data?.company_name || n.data?.company_id || 'su empresa')}`;
     } else if (n.type === 'points_purchase_approved') {
       icon = 'check-circle'; iconColor = 'green';
-      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue aprobada`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue acreditada`;
     } else if (n.type === 'points_purchase_rejected') {
       icon = 'x-circle'; iconColor = 'red';
-      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue rechazada`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue rechazada${n.data?.rejection_reason ? ` · <em>${esc(n.data.rejection_reason)}</em>` : ''}`;
+    } else if (n.type === 'points_purchase_status_update') {
+      icon = 'coins'; iconColor = 'violet';
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> está ahora en: <strong>${esc(n.data?.status_label || n.data?.status || '—')}</strong>`;
     } else if (n.type === 'csv_request') {
       icon = 'file-up'; iconColor = 'amber';
       text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó cargar <strong>${n.data?.row_count || '?'} empleados</strong> (${esc(n.data?.file_name || 'CSV')})`;
@@ -5582,10 +5778,13 @@ function renderNotificationsPage() {
       text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó comprar <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> para <strong>${esc(n.data?.company_name || n.data?.company_id || 'su empresa')}</strong>`;
     } else if (n.type === 'points_purchase_approved') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0"><i data-lucide="check-circle" class="w-5 h-5 text-green-500"></i></div>`;
-      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue aprobada. Los puntos se acreditarán a la brevedad.`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue acreditada.`;
     } else if (n.type === 'points_purchase_rejected') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><i data-lucide="x-circle" class="w-5 h-5 text-red-500"></i></div>`;
-      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue rechazada.`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> fue rechazada.${n.data?.rejection_reason ? `<br><span class="text-gray-500 text-xs">Motivo: ${esc(n.data.rejection_reason)}</span>` : ''}`;
+    } else if (n.type === 'points_purchase_status_update') {
+      avatarContent = `<div class="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center shrink-0"><i data-lucide="coins" class="w-5 h-5 text-violet-500"></i></div>`;
+      text = `Tu solicitud de <strong>${Number(n.data?.points || 0).toLocaleString('es-AR')} puntos</strong> está ahora en: <strong>${esc(n.data?.status_label || n.data?.status || '—')}</strong>`;
     } else if (n.type === 'csv_request') {
       avatarContent = `<div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0"><i data-lucide="file-up" class="w-5 h-5 text-amber-500"></i></div>`;
       text = `<span class="font-semibold">${esc(n.data?.requester_name || 'Admin')}</span> solicitó cargar <strong>${n.data?.row_count || '?'} empleados</strong> · ${esc(n.data?.file_name || 'CSV')} · ${esc(n.data?.company_id || '')}`;
@@ -5681,9 +5880,13 @@ async function handleNotificationClick(id) {
   } else if (n.type === 'program_approved' || n.type === 'program_rejected') {
     _closeAllOverlays();
     openProgramsPage();
-  } else if (n.type === 'points_purchase_request' || n.type === 'points_purchase_approved' || n.type === 'points_purchase_rejected') {
+  } else if (n.type === 'points_purchase_request') {
     _closeAllOverlays();
     openPointsPage();
+  } else if (n.type === 'points_purchase_approved' || n.type === 'points_purchase_rejected' || n.type === 'points_purchase_status_update') {
+    _closeAllOverlays();
+    openPointsPage();
+    setTimeout(() => openPtsOrdersPage(), 300);
   } else if (n.type === 'recognition' || n.type === 'reaction' || n.type === 'comment') {
     const recId = n.data?.recognition_id;
     if (recId) {
@@ -6523,12 +6726,13 @@ function buildStoreRewardCard(r, userPts, isPlaceholder, cat) {
 }
 
 function buildSuperadminRewardCard(r, redemptionCount, cat) {
-  const cost      = r.points_cost ?? 0;
-  const name      = esc(r.name || '');
-  const desc      = esc(r.description || '');
-  const id        = r.id || '';
-  const imgSrc    = r.image_url || _storePlaceholderImg(r.emoji || cat?.emoji, cat?.bg);
-  const stock     = r.stock;
+  const cost       = r.points_cost ?? 0;
+  const priceUsd   = r.price_usd != null ? Number(r.price_usd).toFixed(2) : '';
+  const name       = esc(r.name || '');
+  const desc       = esc(r.description || '');
+  const id         = r.id || '';
+  const imgSrc     = r.image_url || _storePlaceholderImg(r.emoji || cat?.emoji, cat?.bg);
+  const stock      = r.stock;
   const stockLabel = (stock === null || stock === undefined) ? 'Sin límite' : `${stock} unidades`;
 
   return `<div class="bg-white rounded-xl border border-gray-100 p-5 flex flex-col gap-3 hover:shadow-md transition relative">
@@ -6545,13 +6749,23 @@ function buildSuperadminRewardCard(r, redemptionCount, cat) {
     </div>
     <div class="flex items-center justify-between mt-auto pt-3 border-t border-gray-50 text-xs">
       <div>
-        <span class="font-black text-violet-600 text-lg">${cost}</span>
+        <span class="font-black text-violet-600 text-lg" id="reward-pts-${id}">${cost}</span>
         <span class="text-gray-400">puntos</span>
       </div>
       <div class="text-right text-gray-500">
         <p>Pedidos: <span class="font-bold text-gray-800">${redemptionCount}</span></p>
         <p>Stock: <span class="font-bold text-gray-800" id="stock-label-${id}">${stockLabel}</span></p>
       </div>
+    </div>
+    <div class="flex items-center gap-2 pt-2 border-t border-gray-50">
+      <span class="text-xs text-gray-400 shrink-0">USD $</span>
+      <input id="price-usd-input-${id}" type="number" min="0" step="0.01" placeholder="Precio en USD"
+        value="${priceUsd}" oninput="previewRewardPts(${JSON.stringify(id)})"
+        class="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-300">
+      <button onclick='updateRewardPricing(${JSON.stringify(id)})'
+        class="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold bg-violet-100 text-violet-700 hover:bg-violet-200 transition">
+        Guardar precio
+      </button>
     </div>
     <div class="flex items-center gap-2 pt-2 border-t border-gray-50">
       <input id="stock-input-${id}" type="number" min="0" placeholder="Sin límite" value="${stock ?? ''}"
@@ -6564,8 +6778,38 @@ function buildSuperadminRewardCard(r, redemptionCount, cat) {
   </div>`;
 }
 
-async function uploadRewardImage(rewardId, inputEl) {
+function previewRewardPts(rewardId) {
+  const input = document.getElementById(`price-usd-input-${rewardId}`);
+  const ptsEl = document.getElementById(`reward-pts-${rewardId}`);
+  if (!input || !ptsEl) return;
+  const usd = parseFloat(input.value);
+  if (!isNaN(usd) && usd > 0) {
+    ptsEl.textContent = Math.round(usd * PTS_PER_USD);
+  }
+}
+
+async function updateRewardPricing(rewardId) {
+  const input = document.getElementById(`price-usd-input-${rewardId}`);
+  if (!input) return;
+  const usd = parseFloat(input.value);
+  if (isNaN(usd) || usd <= 0) { showErrorToast('Ingresá un precio válido en USD'); return; }
+  const pts = Math.round(usd * PTS_PER_USD);
+  const { isOk } = await window.rewardSdk.updatePricing(rewardId, usd, pts);
+  if (!isOk) { showErrorToast('Error al guardar el precio'); return; }
+  const ptsEl = document.getElementById(`reward-pts-${rewardId}`);
+  if (ptsEl) ptsEl.textContent = pts;
+  showSuccessToast(`Precio actualizado: $${usd.toFixed(2)} USD = ${pts} puntos`);
+}
+
+// ── Image cropper ─────────────────────────────────────────────────────────────
+let _cropperInstance = null;
+let _cropperRewardId = null;
+let _cropperExt      = 'jpeg';
+let _cropperFlipXVal = 1;
+
+function uploadRewardImage(rewardId, inputEl) {
   const file = inputEl.files?.[0];
+  inputEl.value = ''; // reset so same file can be re-selected
   if (!file) return;
 
   const ext = file.name.split('.').pop().toLowerCase();
@@ -6574,29 +6818,103 @@ async function uploadRewardImage(rewardId, inputEl) {
     return;
   }
 
-  const path = `rewards/${rewardId}-${Date.now()}.${ext}`;
-  const { error: uploadError } = await _sb.storage
-    .from('image-library')
-    .upload(path, file, { cacheControl: '3600', upsert: false });
+  _cropperRewardId = rewardId;
+  _cropperExt      = ext === 'jpg' ? 'jpeg' : ext;
 
-  if (uploadError) {
-    console.error('[uploadRewardImage] upload error:', uploadError);
-    showErrorToast(`Error al subir la imagen: ${uploadError.message || uploadError}`);
-    return;
-  }
+  const reader = new FileReader();
+  reader.onload = (e) => _openCropperModal(e.target.result);
+  reader.readAsDataURL(file);
+}
 
-  const { data } = _sb.storage.from('image-library').getPublicUrl(path);
-  const url = data.publicUrl;
+function _openCropperModal(src) {
+  const modal = document.getElementById('img-cropper-modal');
+  const img   = document.getElementById('cropper-source-img');
+  if (!modal || !img) return;
 
-  const { isOk } = await window.rewardSdk.updateImage(rewardId, url);
-  if (!isOk) {
-    showErrorToast('Error al guardar la imagen del producto');
-    return;
-  }
+  if (_cropperInstance) { _cropperInstance.destroy(); _cropperInstance = null; }
+  _cropperFlipXVal = 1;
 
-  const img = document.getElementById(`reward-img-${rewardId}`);
-  if (img) img.src = url;
-  showSuccessToast('Imagen actualizada');
+  img.src = src;
+  modal.classList.remove('hidden');
+  lucide.createIcons();
+
+  img.onload = () => {
+    _cropperInstance = new Cropper(img, {
+      viewMode:           1,
+      dragMode:           'move',
+      autoCropArea:       1,
+      restore:            false,
+      guides:             true,
+      center:             true,
+      highlight:          true,
+      cropBoxMovable:     true,
+      cropBoxResizable:   true,
+      toggleDragModeOnDblclick: false,
+      background:         true,
+    });
+  };
+}
+
+function closeCropperModal() {
+  document.getElementById('img-cropper-modal')?.classList.add('hidden');
+  if (_cropperInstance) { _cropperInstance.destroy(); _cropperInstance = null; }
+  _cropperRewardId = null;
+}
+
+function _cropperAction(action, arg) {
+  if (!_cropperInstance) return;
+  if (action === 'rotate') _cropperInstance.rotate(arg);
+  if (action === 'zoom')   _cropperInstance.zoom(arg);
+  if (action === 'flipX')  { _cropperFlipXVal *= -1; _cropperInstance.scaleX(_cropperFlipXVal); }
+  if (action === 'reset')  { _cropperFlipXVal = 1; _cropperInstance.reset(); }
+}
+
+async function saveCroppedImage() {
+  if (!_cropperInstance || !_cropperRewardId) return;
+
+  const btn = document.getElementById('cropper-save-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin inline-block mr-1"></i> Guardando...'; lucide.createIcons(); }
+
+  const mime   = _cropperExt === 'png' ? 'image/png' : _cropperExt === 'webp' ? 'image/webp' : 'image/jpeg';
+  const canvas = _cropperInstance.getCroppedCanvas({ width: 900, height: 900, imageSmoothingQuality: 'high' });
+
+  canvas.toBlob(async (blob) => {
+    if (!blob) {
+      showErrorToast('Error al procesar la imagen');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Guardar imagen'; lucide.createIcons(); }
+      return;
+    }
+
+    const rewardId = _cropperRewardId;
+    const fileExt  = _cropperExt === 'jpeg' ? 'jpg' : _cropperExt;
+    const path     = `rewards/${rewardId}-${Date.now()}.${fileExt}`;
+
+    const { error: uploadError } = await _sb.storage
+      .from('image-library')
+      .upload(path, blob, { cacheControl: '3600', upsert: false, contentType: mime });
+
+    if (uploadError) {
+      showErrorToast(`Error al subir la imagen: ${uploadError.message || uploadError}`);
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Guardar imagen'; lucide.createIcons(); }
+      return;
+    }
+
+    const { data } = _sb.storage.from('image-library').getPublicUrl(path);
+    const url = data.publicUrl;
+
+    const { isOk } = await window.rewardSdk.updateImage(rewardId, url);
+    if (!isOk) {
+      showErrorToast('Error al guardar la imagen del producto');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Guardar imagen'; lucide.createIcons(); }
+      return;
+    }
+
+    const imgEl = document.getElementById(`reward-img-${rewardId}`);
+    if (imgEl) imgEl.src = url;
+
+    closeCropperModal();
+    showSuccessToast('Imagen actualizada');
+  }, mime, 0.92);
 }
 
 async function updateRewardStock(rewardId) {
@@ -7326,7 +7644,7 @@ function _buildActiveProgramCard(p) {
         <button onclick="openProgramHistory('${p.id}'); closeProgramMenus()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left"><i data-lucide="clock" class="w-3.5 h-3.5 shrink-0"></i> Historial</button>
         <button onclick="openEditProgramModal('${p.id}'); closeProgramMenus()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition text-left"><i data-lucide="pencil" class="w-3.5 h-3.5 shrink-0"></i> Editar</button>
         ${isSA ? `<button onclick="openSaDeleteProgramModal('${p.id}','${safeName}',null,'${p.company_id||''}'); closeProgramMenus()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition text-left"><i data-lucide="shield-off" class="w-3.5 h-3.5 shrink-0"></i> Eliminar</button>`
-          : `<div class="relative group/del"><button disabled class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-300 cursor-not-allowed text-left"><i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i> Eliminar</button><div class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-800 text-white text-xs rounded-lg px-3 py-2 opacity-0 group-hover/del:opacity-100 transition-opacity z-50 text-center leading-snug shadow-lg">Solo el superadmin puede eliminar programas.<div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div></div></div>`}
+          : `<div class="relative group/del"><button disabled class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-300 cursor-not-allowed text-left"><i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i> Eliminar</button><div class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-800 text-white text-xs rounded-lg px-3 py-2 opacity-0 group-hover/del:opacity-100 transition-opacity z-50 text-center leading-snug shadow-lg">No tenés permiso para realizar esta acción.<div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div></div></div>`}
       </div>
     </div>` : p.global && isSA ? `
     <div class="absolute top-3 right-3" style="z-index:2;">

@@ -288,6 +288,17 @@ window.recognitionSdk = {
     return { isOk: !error, data };
   },
 
+  async sentWithPoints(userId, limit = 5) {
+    const { data, error } = await _sb.from('recognitions')
+      .select('id, points, program, created_at, to_user:profiles!recognitions_to_user_id_fkey(id, name)')
+      .eq('from_user_id', userId)
+      .gt('points', 0)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) _log('recognitions sentWithPoints error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+
   async recentForUser(userId, limit = 6) {
     const [rcv, snt] = await Promise.all([
       _sb.from('recognitions')
@@ -466,24 +477,62 @@ window.pointsRequestSdk = {
     return { isOk: !error, data: data || null };
   },
 
-  // Todas las solicitudes pendientes (superadmin)
+  // Todas las solicitudes de la empresa (historial admin)
+  async getAllForCompany(companyId) {
+    const { data, error } = await _sb
+      .from('points_purchase_requests')
+      .select('id, company_id, requested_by, points, status, rejection_reason, created_at, processed_at, processed_by')
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error) _log('pointsRequest getAllForCompany error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+
+  // Historial completo (superadmin) — todas las empresas, todos los estados
+  async getAll(limit = 100) {
+    const { data, error } = await _sb
+      .from('points_purchase_requests')
+      .select('id, company_id, requested_by, points, status, rejection_reason, created_at, processed_at, processed_by')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) _log('pointsRequest getAll error:', error.message);
+    return { isOk: !error, data: data || [] };
+  },
+
+  // Todas las solicitudes en curso (superadmin)
   async getAllPending() {
     const { data, error } = await _sb
       .from('points_purchase_requests')
-      .select('id, company_id, requested_by, points, status, created_at, processed_at, processed_by')
-      .eq('status', 'pending')
+      .select('id, company_id, requested_by, points, status, rejection_reason, created_at, processed_at, processed_by')
+      .in('status', ['pending', 'en_facturacion', 'facturado'])
       .order('created_at', { ascending: false });
     if (error) _log('pointsRequest getAllPending error:', error.message);
     return { isOk: !error, data: data || [] };
   },
 
-  async updateStatus(id, status, processedByUserId) {
+  async updateStatus(id, status, processedByUserId, rejectionReason) {
+    if (!id || typeof id !== 'string') {
+      _log('pointsRequest updateStatus: id inválido:', id);
+      return { isOk: false, errorMsg: 'ID de solicitud faltante o inválido' };
+    }
+    const payload = { status };
+    if (processedByUserId && typeof processedByUserId === 'string') {
+      payload.processed_at = new Date().toISOString();
+      payload.processed_by = processedByUserId;
+    }
+    if (rejectionReason && typeof rejectionReason === 'string') {
+      payload.rejection_reason = rejectionReason.slice(0, 1000);
+    }
     const { error } = await _sb
       .from('points_purchase_requests')
-      .update({ status, processed_at: new Date().toISOString(), processed_by: processedByUserId || null })
+      .update(payload)
       .eq('id', id);
-    if (error) _log('pointsRequest updateStatus error:', error.message);
-    return { isOk: !error };
+    if (error) {
+      _log('pointsRequest updateStatus error:', error.message, '| code:', error.code, '| details:', error.details, '| hint:', error.hint);
+      return { isOk: false, errorMsg: error.message };
+    }
+    return { isOk: true };
   },
 };
 
@@ -530,12 +579,12 @@ window.autoRecognitionSdk = {
 // ─── Company SDK ─────────────────────────────────────────────────────────────
 window.companySdk = {
   async list() {
-    const { data, error } = await _sb.from('companies').select('id, name, domain, store_enabled').order('name');
+    const { data, error } = await _sb.from('companies').select('id, name, domain, store_enabled, award_min_pts, award_max_pts').order('name');
     if (error) _log('companies list error:', error.message);
     return { isOk: !error, data: data || [] };
   },
   async getById(companyId) {
-    const { data, error } = await _sb.from('companies').select('id, name, domain, store_enabled').eq('id', companyId).maybeSingle();
+    const { data, error } = await _sb.from('companies').select('id, name, domain, store_enabled, award_min_pts, award_max_pts').eq('id', companyId).maybeSingle();
     if (error) _log('companies getById error:', error.message);
     return { isOk: !error, data };
   },
@@ -676,7 +725,7 @@ window.notificationSdk = {
 window.rewardSdk = {
   async list(companyId) {
     const { data, error } = await _sb.from('rewards')
-      .select('id, company_id, name, description, points_cost, category, image_url, emoji, available, stock, badge')
+      .select('id, company_id, name, description, points_cost, price_usd, category, image_url, emoji, available, stock, badge')
       .or(`company_id.eq.${companyId},company_id.is.null`).eq('available', true)
       .order('points_cost');
     if (error) _log('rewards list error:', error.message);
@@ -691,7 +740,7 @@ window.rewardSdk = {
 
   async listAll() {
     const { data, error } = await _sb.from('rewards')
-      .select('id, company_id, name, description, points_cost, category, image_url, emoji, available, stock, badge')
+      .select('id, company_id, name, description, points_cost, price_usd, category, image_url, emoji, available, stock, badge')
       .order('points_cost');
     if (error) _log('rewards listAll error:', error.message);
     return { isOk: !error, data: data || [] };
@@ -708,6 +757,13 @@ window.rewardSdk = {
     const { error } = await _sb.from('rewards')
       .update({ image_url: imageUrl }).eq('id', rewardId);
     if (error) _log('rewards updateImage error:', error.message);
+    return { isOk: !error, error };
+  },
+
+  async updatePricing(rewardId, priceUsd, pointsCost) {
+    const { error } = await _sb.from('rewards')
+      .update({ price_usd: priceUsd, points_cost: pointsCost }).eq('id', rewardId);
+    if (error) _log('rewards updatePricing error:', error.message);
     return { isOk: !error, error };
   },
 
@@ -1305,6 +1361,22 @@ window.csvRequestSdk = {
 
 // ─── Audit SDK ────────────────────────────────────────────────────────────────
 window.auditSdk = {
+  async log({ actorId, actorEmail, actorRole, action, targetId, targetType, targetName, companyId, metadata } = {}) {
+    const { error } = await _sb.from('audit_logs').insert({
+      actor_id:    actorId    || null,
+      actor_email: actorEmail || null,
+      actor_role:  actorRole  || null,
+      company_id:  companyId  || null,
+      action,
+      target_id:   targetId   || null,
+      target_type: targetType || null,
+      target_name: targetName || null,
+      metadata:    metadata   || null,
+    });
+    if (error) _log('auditSdk log error:', error.message);
+    return { isOk: !error };
+  },
+
   async list({ page = 0, limit = 50, action = null, companyId = null } = {}) {
     let query = _sb.from('audit_logs')
       .select('id, created_at, actor_id, actor_email, actor_role, company_id, action, target_id, target_type, target_name, metadata')
