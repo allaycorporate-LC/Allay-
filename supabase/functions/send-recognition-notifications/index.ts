@@ -69,11 +69,15 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { error } = await adminClient.from('notifications').insert(rows);
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    // Process in batches of 500 to support large group recognitions
+    const BATCH = 500;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await adminClient.from('notifications').insert(rows.slice(i, i + BATCH));
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     return new Response(JSON.stringify({ ok: true }), {

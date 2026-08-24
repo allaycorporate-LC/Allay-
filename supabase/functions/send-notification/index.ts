@@ -52,17 +52,15 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     // body: { notifications: [{ user_id, type, data }] }
-    const incoming = (body.notifications || []).slice(0, 100); // max 100 por llamada
-    const rows = incoming.map((n: { user_id: string; type: string; data: Record<string, unknown> }) => ({
-      user_id: n.user_id,
-      type:    n.type,
-      data:    n.data ?? {},
-      read:    false,
-    }));
-
-    if (rows.length === 0) {
+    const incoming: { user_id: string; type: string; data: Record<string, unknown> }[] = body.notifications || [];
+    if (incoming.length === 0) {
       return new Response(JSON.stringify({ ok: true }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (incoming.length > 2000) {
+      return new Response(JSON.stringify({ error: 'Too many notifications in a single request (max 2000)' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
@@ -71,11 +69,21 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { error } = await adminClient.from('notifications').insert(rows);
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    // Process in batches of 500 so large recognitions (200+ recipients) work fine
+    const BATCH = 500;
+    for (let i = 0; i < incoming.length; i += BATCH) {
+      const rows = incoming.slice(i, i + BATCH).map(n => ({
+        user_id: n.user_id,
+        type:    n.type,
+        data:    n.data ?? {},
+        read:    false,
+      }));
+      const { error } = await adminClient.from('notifications').insert(rows);
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     return new Response(JSON.stringify({ ok: true }), {
