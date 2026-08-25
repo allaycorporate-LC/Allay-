@@ -236,7 +236,15 @@ async function handleLogin(e) {
       return;
     }
 
-    await window.dataSdk.refresh();
+    // Quick single-row fetch to determine company scope before loading all profiles.
+    // Superadmin loads all companies; everyone else loads only their own company.
+    const { data: _scopeHint } = await window.dataSdk.getByEmail(email);
+    if (_scopeHint?.role === 'superadmin' || !_scopeHint?.company_id) {
+      window.dataSdk.clearScope();
+      await window.dataSdk.refresh();
+    } else {
+      await window.dataSdk.setScope(_scopeHint.company_id);
+    }
 
     const profile = allUsers.find(u => u.email === email);
 
@@ -507,6 +515,7 @@ function logout() {
   clearTimeout(_feedRefreshTimer);
   _feedRefreshTimer = null;
 
+  window.dataSdk.clearScope();
   window.authSdk.logout();
   currentUser = null;
   isLoggedIn  = false;
@@ -661,6 +670,12 @@ const dataHandler = {
     employees = [...allUsers];
     _rebuildCompanyMemberIds();
     if (isLoggedIn && currentUser) {
+      // Keep currentUser.points_to_give / points_to_redeem in sync with DB
+      const me = allUsers.find(u => u.__backendId === currentUser.__backendId);
+      if (me) {
+        currentUser.points_to_give   = me.points_to_give;
+        currentUser.points_to_redeem = me.points_to_redeem;
+      }
       filterEmployeesByCompany();
       renderEmployeesList();
       renderPeopleList();
@@ -919,6 +934,17 @@ function handleFileSelect(input) {
   if (hint) hint.textContent = `Archivo: ${file.name}`;
 }
 
+function _resolveCompanyId(value) {
+  if (!value) return null;
+  const v = value.trim();
+  if (!v) return null;
+  // Already a UUID → use as-is
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) return v;
+  // Try matching by company name (case-insensitive)
+  const match = _companiesData.find(c => c.name?.toLowerCase() === v.toLowerCase());
+  return match?.id || v;
+}
+
 function parseCSV(csvText) {
   // Normalize line endings and strip BOM
   const normalized = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^﻿/, '');
@@ -984,7 +1010,7 @@ function parseCSV(csvText) {
         email,
         password:         cols[passwordIdx] || 'Allay2024!',
         department:       cols[deptIdx]    || cols[2] || 'General',
-        company_id:       cols[companyIdx] || currentUser?.company_id || 'comp-1',
+        company_id:       _resolveCompanyId(cols[companyIdx]) || currentUser?.company_id || 'comp-1',
         points_to_give:   parseInt(cols[giveIdx]   || cols[3]) || 100,
         points_to_redeem: parseInt(cols[redeemIdx] || cols[4]) || 0,
         user_id:          email,
@@ -1649,18 +1675,70 @@ async function savePoints() {
   const newGive   = Math.max(0, giveOp   === 'add' ? emp.points_to_give   + giveVal   : emp.points_to_give   - giveVal);
   const newRedeem = Math.max(0, redeemOp === 'add' ? emp.points_to_redeem + redeemVal : emp.points_to_redeem - redeemVal);
 
+  // When an admin (or superadmin impersonating an admin) adds points_to_give to an employee,
+  // deduct the same amount from the admin's own points_to_give.
+  // Superadmin acting directly (not impersonating) is a manual adjustment — no deduction.
+  const _isAdminContext = isImpersonating || currentUser?.role === 'admin';
+  const sourceAdmin     = _isAdminContext
+    ? allUsers.find(u => u.__backendId === currentUser.__backendId)
+    : null;
+
+  if (sourceAdmin && giveOp === 'add' && giveVal > 0) {
+    const available = sourceAdmin.points_to_give ?? 0;
+    if (available < giveVal) {
+      showErrorToast(`Puntos insuficientes. Disponible: ${available.toLocaleString('es-AR')} pts`);
+      return;
+    }
+  }
+
   const btn = document.getElementById('points-save-btn');
   btn.disabled = true;
   btn.textContent = 'Guardando...';
 
+  // Deduct from admin using dataSdk.update (same path as employee update, works with RLS)
+  if (sourceAdmin && giveOp === 'add' && giveVal > 0) {
+    const newAdminBalance = (sourceAdmin.points_to_give ?? 0) - giveVal;
+    const { isOk: deducted } = await window.dataSdk.update({
+      ...sourceAdmin,
+      points_to_give: newAdminBalance,
+    });
+    if (!deducted) {
+      showErrorToast('No se pudieron descontar los puntos del administrador');
+      btn.disabled = false;
+      btn.textContent = 'Guardar cambios';
+      return;
+    }
+    // Optimistic local update so subsequent modals see the correct balance immediately
+    sourceAdmin.points_to_give      = newAdminBalance;
+    currentUser.points_to_give      = newAdminBalance;
+  }
+
   const result = await window.dataSdk.update({ ...emp, points_to_give: newGive, points_to_redeem: newRedeem });
+  // Optimistic local update for the employee too
+  emp.points_to_give   = newGive;
+  emp.points_to_redeem = newRedeem;
 
   btn.disabled = false;
   btn.textContent = 'Guardar cambios';
 
   if (result.isOk) {
+    if (sourceAdmin && giveOp === 'add' && giveVal > 0) {
+      window.auditSdk.log({
+        actorId:    currentUser.__backendId,
+        actorEmail: currentUser.email,
+        actorRole:  currentUser.role,
+        action:     'points.distribute',
+        targetId:   emp.__backendId,
+        targetType: 'user',
+        targetName: emp.name,
+        companyId:  currentUser.company_id,
+        metadata:   { points: giveVal },
+      });
+    }
     showSuccessToast(`Puntos actualizados para ${emp.name}`);
     closePointsModal();
+    updateAllPointsDisplays();
+    refreshPtsWidgetIfOpen();
     await window.dataSdk.refresh();
     filterEmployeesByCompany();
     renderEmployeesList();
@@ -4125,13 +4203,28 @@ function togglePointsSwitch() {
   _setPointsSwitch(!isOn);
   if (!isOn) {
     _modalAvailPts = currentUser?.points_to_give ?? 0;
-    const start = Math.min(_companyAwardMinPts, _modalAvailPts);
-    document.getElementById('points-val').value = start;
     const modalPtsAvail = document.getElementById('modal-pts-available');
     if (modalPtsAvail) modalPtsAvail.textContent = _modalAvailPts;
+
+    // If user has no personal pts but program has budget, auto-check the program source
+    const prog = _getProgramByLabel(selectedProgram);
+    const cb   = document.getElementById('use-program-budget');
+    if (cb && !cb.checked && _modalAvailPts === 0 && prog?.custom && _getProgramRemainingBudget(prog) > 0) {
+      cb.checked = true;
+    }
+
+    const usingBudget = cb?.checked;
+    const n           = Math.max(1, _selectedRecipients.length);
+    const maxPts = usingBudget && prog?.custom
+      ? Math.floor(_getProgramRemainingBudget(prog) / n)
+      : _modalAvailPts;
+    const start = Math.min(_companyAwardMinPts, maxPts);
+    document.getElementById('points-val').value = start;
     _renderPointsPresets(start);
     _checkPointsValidity(start);
   } else {
+    const cb = document.getElementById('use-program-budget');
+    if (cb) cb.checked = false;
     document.getElementById('modal-next').disabled = false;
   }
 }
@@ -4353,14 +4446,20 @@ function _renderPointsPresets(selectedPts) {
   const hint      = document.getElementById('points-max-hint');
   if (!container) return;
 
-  const STEP_PTS  = PTS_PER_USD * 5;
-  const maxAfford = Math.min(_modalAvailPts, _companyAwardMaxPts);
+  const STEP_PTS    = PTS_PER_USD * 5;
+  const usingBudget = document.getElementById('use-program-budget')?.checked;
+  const prog        = _getProgramByLabel(selectedProgram);
+  const n           = Math.max(1, _selectedRecipients.length);
 
-  if (hint) hint.textContent = `Máximo disponible: ${maxAfford.toLocaleString('es-AR')} puntos`;
+  const effectiveMax = (usingBudget && prog?.custom)
+    ? Math.min(Math.floor(_getProgramRemainingBudget(prog) / n), _companyAwardMaxPts)
+    : Math.min(_modalAvailPts, _companyAwardMaxPts);
+
+  if (hint) hint.textContent = `Máximo disponible: ${effectiveMax.toLocaleString('es-AR')} puntos`;
 
   const btns = [];
   for (let pts = _companyAwardMinPts; pts <= _companyAwardMaxPts; pts += STEP_PTS) {
-    const canAfford  = _modalAvailPts >= pts;
+    const canAfford  = effectiveMax >= pts;
     const isSelected = pts === selectedPts;
     btns.push(`<button type="button"
       onclick="selectPresetPts(${pts})"
@@ -4452,8 +4551,9 @@ function toggleBudgetSource() {
   if (using && prog) {
     const remaining    = _getProgramRemainingBudget(prog);
     const maxPerPerson = Math.floor(remaining / n);
-    const cur = Math.min(parseInt(inp?.value || 0), maxPerPerson);
+    const cur = Math.min(parseInt(inp?.value || _companyAwardMinPts), maxPerPerson) || _companyAwardMinPts;
     if (inp) inp.value = cur;
+    _renderPointsPresets(cur);
     document.getElementById('points-warning').classList.add('hidden');
     document.getElementById('modal-next').disabled = false;
   } else {
@@ -4693,26 +4793,52 @@ async function _fetchAndRenderPtsHistory() {
 
   listEl.innerHTML = '<p class="text-[10px] text-gray-400 px-1 py-1">Cargando...</p>';
 
-  const { data } = await window.recognitionSdk.sentWithPoints(currentUser.__backendId, 5);
+  const uid = currentUser.__backendId;
+  const [{ data: sentRecs }, { data: approvedPurchases }, { data: distribLogs }] = await Promise.all([
+    window.recognitionSdk.sentWithPoints(uid, 10),
+    _sb.from('points_purchase_requests')
+      .select('id, points, created_at, processed_at')
+      .eq('requested_by', uid)
+      .in('status', ['acreditado', 'approved'])
+      .order('processed_at', { ascending: false })
+      .limit(10),
+    _sb.from('audit_logs')
+      .select('id, metadata, created_at, target_name')
+      .eq('actor_id', uid)
+      .eq('action', 'points.distribute')
+      .order('created_at', { ascending: false })
+      .limit(10),
+  ]);
 
-  if (!data || data.length === 0) {
-    listEl.innerHTML = '<p class="text-[10px] text-gray-400 px-1 py-1">No enviaste puntos todavía.</p>';
+  const events = [];
+  for (const r of sentRecs || []) {
+    events.push({ type: 'out', points: r.points ?? 0, label: r.to_user?.name?.split(' ')[0] || 'Usuario', date: new Date(r.created_at) });
+  }
+  for (const p of approvedPurchases || []) {
+    events.push({ type: 'in', points: p.points ?? 0, label: 'Compra acreditada', date: new Date(p.processed_at || p.created_at) });
+  }
+  for (const d of distribLogs || []) {
+    events.push({ type: 'out', points: d.metadata?.points ?? 0, label: d.target_name?.split(' ')[0] || 'Empleado', date: new Date(d.created_at) });
+  }
+  events.sort((a, b) => b.date - a.date);
+  const recent = events.slice(0, 8);
+
+  if (recent.length === 0) {
+    listEl.innerHTML = '<p class="text-[10px] text-gray-400 px-1 py-1">No hay movimientos todavía.</p>';
     return;
   }
 
-  listEl.innerHTML = data.map(r => {
-    const toName  = r.to_user?.name || 'Usuario';
-    const first   = toName.split(' ')[0];
-    const initial = first.charAt(0).toUpperCase();
-    const pts     = r.points ?? 0;
-    const time    = formatTimeAgo(r.created_at);
+  listEl.innerHTML = recent.map(ev => {
+    const isIn    = ev.type === 'in';
+    const initial = isIn ? '↑' : ev.label.charAt(0).toUpperCase();
+    const time    = formatTimeAgo(ev.date.toISOString());
     return `<div class="flex items-center gap-2 px-1 py-1.5 rounded-lg hover:bg-white/60 transition">
-      <div class="w-6 h-6 rounded-full bg-violet-200 flex items-center justify-center shrink-0 text-[10px] font-bold text-violet-700">${initial}</div>
+      <div class="w-6 h-6 rounded-full ${isIn ? 'bg-green-100' : 'bg-violet-200'} flex items-center justify-center shrink-0 text-[10px] font-bold ${isIn ? 'text-green-700' : 'text-violet-700'}">${initial}</div>
       <div class="flex-1 min-w-0">
-        <p class="text-[11px] font-semibold text-gray-700 truncate">${esc(first)}</p>
+        <p class="text-[11px] font-semibold text-gray-700 truncate">${esc(ev.label)}</p>
         <p class="text-[10px] text-gray-400">${time}</p>
       </div>
-      <span class="text-[11px] font-bold text-violet-600 shrink-0">−${pts.toLocaleString('es-AR')} pts</span>
+      <span class="text-[11px] font-bold ${isIn ? 'text-green-600' : 'text-violet-600'} shrink-0">${isIn ? '+' : '−'}${ev.points.toLocaleString('es-AR')} pts</span>
     </div>`;
   }).join('');
 }

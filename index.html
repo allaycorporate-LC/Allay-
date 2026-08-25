@@ -54,7 +54,7 @@
     }
   </script>
 
-  <script src="_sdk/data_sdk.js?v=61" type="text/javascript"></script>
+  <script src="_sdk/data_sdk.js?v=62" type="text/javascript"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
@@ -788,7 +788,7 @@
             <input type="radio" name="np-funding" id="np-fund-request" value="request" checked onchange="_updateNpFundingStyle()" class="mt-0.5 accent-violet-600">
             <div>
               <p class="text-sm font-semibold text-gray-800">Solicitar al administrador</p>
-              <p class="text-xs text-gray-500">El admin cubre el presupuesto desde su billetera.</p>
+              <p class="text-xs text-gray-500">El administrador revisará y aprobará la solicitud.</p>
             </div>
           </label>
           <label id="np-fund-self-lbl" class="flex items-start gap-3 p-3 rounded-xl border-2 border-gray-200 bg-white cursor-pointer transition">
@@ -1102,18 +1102,6 @@
             class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"></textarea>
         </div>
 
-        <!-- Program budget banner (shown when selected program has budget) -->
-        <div id="program-budget-info" class="hidden rounded-xl bg-celeste-50 border border-celeste-200 px-4 py-3">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-semibold text-celeste-700">Presupuesto del programa</span>
-            <span class="text-xs font-bold text-celeste-700"><span id="budget-remaining">0</span> puntos disponibles</span>
-          </div>
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" id="use-program-budget" onchange="toggleBudgetSource()"
-              class="w-4 h-4 rounded border-gray-300 accent-celeste-500">
-            <span class="text-xs text-celeste-800 font-medium">Usar puntos del programa</span>
-          </label>
-        </div>
         <!-- Points toggle + slider — hidden when store is disabled for this company -->
         <div id="modal-points-section">
         <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
@@ -1135,6 +1123,20 @@
           </div>
           <!-- Points picker (hidden by default) -->
           <div id="points-slider-wrap" class="hidden mt-4 space-y-3">
+            <!-- Program budget source selector (shown when selected program has budget) -->
+            <div id="program-budget-info" class="hidden rounded-xl bg-celeste-50 border border-celeste-200 px-3 py-2.5">
+              <div class="flex items-center justify-between">
+                <div>
+                  <span class="text-xs font-semibold text-celeste-700">Presupuesto del programa</span>
+                  <span class="text-xs text-celeste-600 ml-1">(<span id="budget-remaining">0</span> pts disponibles)</span>
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="use-program-budget" onchange="toggleBudgetSource()"
+                    class="w-4 h-4 rounded border-gray-300 accent-celeste-500">
+                  <span class="text-xs text-celeste-800 font-medium">Usar del programa</span>
+                </label>
+              </div>
+            </div>
             <!-- Preset buttons -->
             <div id="points-preset-btns" class="flex flex-wrap gap-2"></div>
             <!-- Manual input + max hint -->
@@ -3628,7 +3630,7 @@
   </div>
 </div>
 
-<script src="js/app.js?v=221"></script>
-<script src="js/analytics.js?v=18"></script>
+<script src="js/app.js?v=229"></script>
+<script src="js/analytics.js?v=19"></script>
 </body>
 </html>

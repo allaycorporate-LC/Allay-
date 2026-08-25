@@ -2868,17 +2868,26 @@ async function updatePointsRequestStatus(id, status, requestedBy, rejectionReaso
   if (!status) return;
   if (!id || typeof id !== 'string') { showErrorToast('No se pudo identificar la solicitud'); return; }
   const processedBy = currentUser?.__backendId || null;
+
+  // Fetch BEFORE updating so we know the previous status (to avoid double-crediting)
+  const { data: ptsRow } = await _sb
+    .from('points_purchase_requests')
+    .select('requested_by, points, status')
+    .eq('id', id)
+    .maybeSingle();
+
   const { isOk, errorMsg } = await window.pointsRequestSdk.updateStatus(id, status, processedBy, rejectionReason || null);
   if (!isOk) { showErrorToast('No se pudo actualizar la solicitud: ' + (errorMsg || 'error desconocido')); return; }
 
-  const st = _PTS_REQ_STATUS[status] || _PTS_REQ_STATUS.pending;
+  // Credit points to the admin's wallet when transitioning to acreditado for the first time
+  const isApproval      = status === 'acreditado' || status === 'approved';
+  const wasAlreadyApproved = ptsRow?.status === 'acreditado' || ptsRow?.status === 'approved';
+  if (isApproval && !wasAlreadyApproved && ptsRow?.requested_by && ptsRow?.points) {
+    const { isOk: credited } = await window.dataSdk.refundPoints(ptsRow.requested_by, ptsRow.points);
+    if (!credited) _log('[updatePtsStatus] Error al acreditar puntos para solicitud', id);
+  }
 
-  // Fetch row for notification data (requested_by + points)
-  const { data: ptsRow } = await _sb
-    .from('points_purchase_requests')
-    .select('requested_by, points')
-    .eq('id', id)
-    .maybeSingle();
+  const st = _PTS_REQ_STATUS[status] || _PTS_REQ_STATUS.pending;
 
   const targetUserId = requestedBy || ptsRow?.requested_by;
   if (targetUserId) {

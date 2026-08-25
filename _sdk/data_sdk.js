@@ -37,14 +37,18 @@ function mapProfile(p) {
 }
 
 window.dataSdk = (function () {
-  let _handler = null;
+  let _handler      = null;
+  let _companyScope = null; // null = load all (superadmin), string = load only that company
+
+  const PROFILE_COLS =
+    'id, name, email, department, company_id, role, points_to_give, points_to_redeem, ' +
+    'password_changed, birthday, anniversary_date, auto_birthday, auto_anniversary, ' +
+    'recognition_visibility, bio, interests, work_style, notif_prefs';
 
   async function fetchAndNotify() {
-    const { data, error } = await _sb.from('profiles').select(
-      'id, name, email, department, company_id, role, points_to_give, points_to_redeem, ' +
-      'password_changed, birthday, anniversary_date, auto_birthday, auto_anniversary, ' +
-      'recognition_visibility, bio, interests, work_style, notif_prefs'
-    );
+    let q = _sb.from('profiles').select(PROFILE_COLS);
+    if (_companyScope) q = q.eq('company_id', _companyScope);
+    const { data, error } = await q;
     if (error) { _log('dataSdk fetch error:', error.message); return; }
     if (_handler) _handler.onDataChanged((data || []).map(mapProfile));
   }
@@ -72,6 +76,26 @@ window.dataSdk = (function () {
 
     async refresh() {
       await fetchAndNotify();
+    },
+
+    // Set company scope: null = all (superadmin), string = only that company's profiles
+    async setScope(companyId) {
+      _companyScope = companyId || null;
+      await fetchAndNotify();
+    },
+
+    clearScope() {
+      _companyScope = null;
+    },
+
+    // Lightweight single-profile fetch used at login to determine scope before bulk load
+    async getByEmail(email) {
+      const { data, error } = await _sb.from('profiles')
+        .select('id, role, company_id, email')
+        .eq('email', email)
+        .maybeSingle();
+      if (error) _log('dataSdk.getByEmail error:', error.message);
+      return { isOk: !error, data };
     },
 
     async updateUserRole(targetUserId, newRole) {
