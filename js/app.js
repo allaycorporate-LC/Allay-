@@ -1,5 +1,6 @@
 ﻿// ------------------------------------------------------------
-var _isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+// _isProd lo define data_sdk.js, que index.html carga en el <head>
+var _isDev = !_isProd;
 var _log   = _isDev ? (...a) => console.error(...a) : () => {};
 
 // ------------------------------------------------------------

@@ -1,15 +1,28 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Allay — Supabase Data SDK
 // ─────────────────────────────────────────────────────────────────────────────
-const SUPABASE_URL     = 'https://smuwnjpmpmwfuysrxkaa.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNtdXduanBtcG13ZnV5c3J4a2FhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MjU3MTAsImV4cCI6MjA5MjIwMTcxMH0.onYPx78n5TaSeig3VQebQY9E6ClvxKZ8eAIebaxLDRQ';
+// Sólo estos hosts pegan contra producción. Cualquier otro origen (localhost,
+// previews de Vercel, un dominio nuevo) cae en dev a propósito: ante un entorno
+// desconocido es preferible escribir en dev y no en la base real.
+// Al conectar un dominio propio hay que agregarlo acá, si no el sitio de
+// producción va a terminar leyendo y escribiendo en la base de dev.
+const _PROD_HOSTS = ['allay-ten.vercel.app'];
+const _isProd     = _PROD_HOSTS.includes(window.location.hostname);
+
+const SUPABASE_URL      = _isProd
+  ? 'https://smuwnjpmpmwfuysrxkaa.supabase.co'
+  : 'https://hanrrwqgyalerjenyxpg.supabase.co';
+
+const SUPABASE_ANON_KEY = _isProd
+  ? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNtdXduanBtcG13ZnV5c3J4a2FhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MjU3MTAsImV4cCI6MjA5MjIwMTcxMH0.onYPx78n5TaSeig3VQebQY9E6ClvxKZ8eAIebaxLDRQ'
+  : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhbnJyd3FneWFsZXJqZW55eHBnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczMzAzNDAsImV4cCI6MjEwMjkwNjM0MH0.7VmscRBCJP1sfcI888dlhwURavrnurassq2FTVer2Ow';
 
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Expose only the auth object — not the full DB client — to minimize XSS blast radius
 window._sbAuth = _sb.auth;
 
-// Solo loguear en desarrollo — no exponer errores internos en producción
-var _isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+// Solo loguear fuera de producción — no exponer errores internos a los usuarios
+var _isDev = !_isProd;
 var _log   = _isDev ? (...a) => console.error(...a) : () => {};
 
 function mapProfile(p) {
